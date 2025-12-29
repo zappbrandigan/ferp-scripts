@@ -28,11 +28,10 @@ regular expression, producing a CSV summary of all matches.
 - Records every match with file name, relative path, page number, match text,
   and surrounding context.
 - Writes deterministic CSV results to the parent directory of the search root,
-  e.g. `../project_query_results.csv`.
+  e.g. `<dir_name>_query_results.csv`.
 
 ## Notes
 
-- Uses PyPDF2’s text extraction; scanned PDFs without text won’t yield results
-  unless OCR is performed beforehand.
+- Scanned PDFs without text won’t yield results unless OCR is performed beforehand.
 - Regex errors, extraction failures, or individual file issues are logged but do
   not abort the entire search.
