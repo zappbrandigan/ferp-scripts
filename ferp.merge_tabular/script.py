@@ -98,6 +98,8 @@ def _read_header(path: Path) -> List[str]:
 def _read_xlsx_header(path: Path) -> List[str]:
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
     sheet = workbook.active
+    if sheet is None:
+        raise ValueError("Workbook has no active sheet")
     header_row = next(sheet.iter_rows(max_row=1, values_only=True), None)
     if header_row is None:
         raise ValueError("File is empty")
@@ -114,6 +116,8 @@ def _iter_rows(path: Path) -> Iterator[Iterable[object]]:
     else:
         workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
         sheet = workbook.active
+        if sheet is None:
+            raise ValueError("Workbook has no active sheet")
         first = True
         for row in sheet.iter_rows(values_only=True):
             if first:
