@@ -7,6 +7,17 @@ from ferp.fscp.scripts import sdk
 
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    confirm = api.confirm(
+        f"This will flatten all subdirectories in {ctx.target_path.stem}. Continue?",
+        default=False
+    )
+    if not confirm:
+        api.emit_result(
+            {
+                "message": "Script cancelled",
+            }
+        )
+        return
     target = ctx.target_path
     if not target.exists() or not target.is_dir():
         raise ValueError(f"Target must be a directory. Received: {target}")
