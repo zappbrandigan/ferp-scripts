@@ -77,7 +77,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             api.progress(current=index, total=total_files, unit="files")
             workbook = None
             try:
-                workbook = xl_window.Workbooks.Open(file, UpdateLinks=0)
+                workbook = xl_window.Workbooks.Open(str(file), UpdateLinks=0)
                 worksheet = workbook.Worksheets(1)
                 print_area = _get_print_area(worksheet)
                 _page_setup(worksheet, print_area, autofit_column)
@@ -208,7 +208,7 @@ def _build_destination(directory: Path, base: str, suffix: str) -> Path:
 
 def _export_pdf(worksheet, out_file):
     """Export Excel worksheet to pdf."""
-    worksheet.ExportAsFixedFormat(0, out_file)
+    worksheet.ExportAsFixedFormat(0, str(out_file))
 
 
 if __name__ == "__main__":
