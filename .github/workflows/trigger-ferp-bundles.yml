@@ -11,32 +11,43 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
+          
       - name: Compute changed script directories
         id: changes
         shell: bash
         run: |
           set -euo pipefail
-
+      
           before="${{ github.event.before }}"
           after="${{ github.sha }}"
-
-          # Handle "first push" edge case where before is all-zero SHA
+      
+          # Handle first push edge case
           if [ "$before" = "0000000000000000000000000000000000000000" ]; then
             files="$(git ls-files)"
           else
             files="$(git diff --name-only "$before" "$after")"
           fi
-
-          # Collect unique top-level directories under scripts/
-          # Example: scripts/ferp.hello_world/script.py -> ferp.hello_world
-          changed_dirs="$(echo "$files" \
-            | awk -F/ '$1=="scripts" && NF>=2 {print $2}' \
+      
+          echo "Changed files:"
+          printf '%s\n' "$files"
+      
+          # Script dirs live at repo root: ferp.<name>/...
+          # Extract top-level directory names and keep only those that exist.
+          dirs="$(printf '%s\n' "$files" \
+            | awk -F/ 'NF>=2 {print $1}' \
             | sort -u \
-            | jq -Rsc 'split("\n") | map(select(length>0))')"
-
-          echo "changed_dirs=$changed_dirs" >> "$GITHUB_OUTPUT"
-          echo "Changed dirs JSON: $changed_dirs"
+            | while IFS= read -r d; do
+                [ -n "$d" ] || continue
+                [ -d "$d" ] || continue
+                case "$d" in
+                  ferp.*) echo "$d" ;;
+                esac
+              done \
+            | jq -Rsc 'split("\n") | map(select(length>0))'
+          )"
+      
+          echo "Changed dirs JSON: $dirs"
+          echo "changed_dirs=$dirs" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch build to ferp
         env:
