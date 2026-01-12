@@ -49,6 +49,20 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         response = api.request_input(
             "Enter search query",
             id="query_pdf_options",
+            fields=[
+                {
+                    "id": "regex", 
+                    "type": "bool", 
+                    "label": "Use regex", 
+                    "default": regex
+                },
+                {
+                    "id": "case_sensitive",
+                    "type": "bool",
+                    "label": "Case sensitive",
+                    "default": case_sensitive,
+                },
+            ],
         )
         if response is None:
             api.exit(code=1)
