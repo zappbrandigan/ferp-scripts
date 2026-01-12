@@ -9,7 +9,7 @@ def main(context: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     api.log("info", f"Hello World invoked for {context.target_path}")
 
     extension = api.request_input(
-        "Enter the file extension",
+        "Enter the fake file extension",
         default=".txt",
     )
 
