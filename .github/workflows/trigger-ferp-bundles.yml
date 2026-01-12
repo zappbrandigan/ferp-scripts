@@ -8,6 +8,36 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute changed script directories
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          before="${{ github.event.before }}"
+          after="${{ github.sha }}"
+
+          # Handle "first push" edge case where before is all-zero SHA
+          if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+            files="$(git ls-files)"
+          else
+            files="$(git diff --name-only "$before" "$after")"
+          fi
+
+          # Collect unique top-level directories under scripts/
+          # Example: scripts/ferp.hello_world/script.py -> ferp.hello_world
+          changed_dirs="$(echo "$files" \
+            | awk -F/ '$1=="scripts" && NF>=2 {print $2}' \
+            | sort -u \
+            | jq -Rsc 'split("\n") | map(select(length>0))')"
+
+          echo "changed_dirs=$changed_dirs" >> "$GITHUB_OUTPUT"
+          echo "Changed dirs JSON: $changed_dirs"
+
       - name: Dispatch build to ferp
         env:
           GH_TOKEN: ${{ secrets.FERP_DISPATCH_TOKEN }}
@@ -15,6 +45,7 @@ jobs:
           TARGET_REPO: ferp
           SCRIPTS_SHA: ${{ github.sha }}
           SCRIPTS_REF: ${{ github.ref }}
+          CHANGED_DIRS: ${{ steps.changes.outputs.changed_dirs }}
         run: |
           set -euo pipefail
 
@@ -25,7 +56,8 @@ jobs:
             --arg scripts_repo "${{ github.repository }}" \
             --arg scripts_sha "${SCRIPTS_SHA}" \
             --arg scripts_ref "${SCRIPTS_REF}" \
-            '{event_type: $event_type, client_payload: {scripts_repo: $scripts_repo, scripts_sha: $scripts_sha, scripts_ref: $scripts_ref}}'
+            --argjson changed_dirs "${CHANGED_DIRS}" \
+            '{event_type: $event_type, client_payload: {scripts_repo: $scripts_repo, scripts_sha: $scripts_sha, scripts_ref: $scripts_ref, changed_dirs: $changed_dirs}}'
           )"
 
           curl -sS -X POST \
@@ -35,3 +67,4 @@ jobs:
             -d "${payload}"
 
           echo "Dispatched scripts_sha=${SCRIPTS_SHA} to ${OWNER}/${TARGET_REPO}"
+          echo "Changed dirs: ${CHANGED_DIRS}"
