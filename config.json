@@ -1,0 +1,201 @@
+{
+  "scripts": [
+    {
+      "id": "ferp.zip_dir",
+      "name": "Directory: Zip",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.zip_dir/script.py",
+        "other": "scripts/ferp.zip_dir/script.py"
+      },
+      "args": [
+        "{target}"
+      ],
+      "requires_input": false,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.unzip_file",
+      "name": "Directory: Unzip",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.unzip_file/script.py",
+        "other": "scripts/ferp.unzip_file/script.py"
+      },
+      "args": [
+        "{target}"
+      ],
+      "requires_input": false,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.extract_pdf_metadata",
+      "name": "Extract: PDF Metadata",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.extract_pdf_metadata/script.py",
+        "other": "scripts/ferp.extract_pdf_metadata/script.py"
+      },
+      "args": [],
+      "requires_input": true,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.backup_dir",
+      "name": "Directory: Backup",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.backup_dir/script.py",
+        "other": "scripts/ferp.backup_dir/script.py"
+      },
+      "args": [
+        "{target}"
+      ],
+      "requires_input": false,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.restore_backup",
+      "name": "Directory: Restore Backup",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.restore_backup/script.py",
+        "other": "scripts/ferp.restore_backup/script.py"
+      },
+      "args": [
+        "{target}"
+      ],
+      "requires_input": false,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.extractor",
+      "name": "Extract: Email Attachments",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.extractor/script.py",
+        "other": "scripts/ferp.extractor/script.py"
+      },
+      "args": [
+        "{target}"
+      ],
+      "requires_input": false,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.flatten_dir",
+      "name": "Directory: Flatten",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.flatten_dir/script.py",
+        "other": "scripts/ferp.flatten_dir/script.py"
+      },
+      "args": [
+        "{target}"
+      ],
+      "requires_input": false,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.query_pdf",
+      "name": "Query: PDF Files",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.query_pdf/script.py",
+        "other": "scripts/ferp.query_pdf/script.py"
+      },
+      "args": [],
+      "requires_input": true,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.merge_tabular",
+      "name": "Merge: Tabular Data",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.merge_tabular/script.py",
+        "other": "scripts/ferp.merge_tabular/script.py"
+      },
+      "args": [],
+      "requires_input": false,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.summarize_tree",
+      "name": "Summarize: Directory",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.summarize_tree/script.py",
+        "other": "scripts/ferp.summarize_tree/script.py"
+      },
+      "args": [],
+      "requires_input": false,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.normalize_pdf_names",
+      "name": "Rename: Cue Sheets",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.normalize_pdf_names/script.py",
+        "other": "scripts/ferp.normalize_pdf_names/script.py"
+      },
+      "args": [],
+      "requires_input": false,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.hello_world",
+      "name": "Test: Hello World",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.hello_world/script.py",
+        "other": "scripts/ferp.hello_world/script.py"
+      },
+      "args": [
+        "{target}"
+      ],
+      "requires_input": true,
+      "target": "current_directory"
+    },
+    {
+      "id": "ferp.rename_fox_emails",
+      "name": "Rename: FOX Emails",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.rename_fox_emails/script.py",
+        "other": "scripts/ferp.rename_fox_emails/script.py"
+      },
+      "args": [],
+      "requires_input": false,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.moonbug",
+      "name": "Convert: Moonbug",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.moonbug/script.py",
+        "other": "scripts/ferp.moonbug/script.py"
+      },
+      "args": [],
+      "requires_input": true,
+      "target": "highlighted_file"
+    }
+  ],
+  "publishers_file": "data/cache/publishers_chache.json"
+}
