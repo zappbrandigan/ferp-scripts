@@ -90,7 +90,7 @@
     },
     {
       "id": "ferp.flatten_dir",
-      "name": "Normalize: Flatten",
+      "name": "Normalize: Flatten Directory",
       "version": "1.0.0",
       "type": "python",
       "script": {
@@ -172,7 +172,7 @@
     },
     {
       "id": "ferp.rename_fox_emails",
-      "name": "Rename: FOX Emails",
+      "name": "Rename: Fox Emails",
       "version": "1.0.0",
       "type": "python",
       "script": {
@@ -185,7 +185,7 @@
     },
     {
       "id": "ferp.moonbug",
-      "name": "Convert: Moonbug",
+      "name": "Convert: Moonbug to PDF",
       "version": "1.0.0",
       "type": "python",
       "script": {
