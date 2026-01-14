@@ -8,102 +8,6 @@ from pathlib import Path
 from ferp.fscp.scripts import sdk
 
 
-@sdk.script
-def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    response = api.request_input(
-        "Options for Moonbug Excel to PDF script",
-        id="moonbug_excel_to_pdf_options",
-        fields=[
-            {
-                "id": "test", 
-                "type": "bool", 
-                "label": "Test mode", 
-                "default": False
-            },
-            {
-                "id": "autofitcolumn", 
-                "type": "bool", 
-                "label": "Autofit columns", 
-                "default": True
-            }
-        ],
-        show_text_input=False 
-    )
-    if response is None:
-        api.exit(code=1)
-        return
-    try:
-        payload = json.loads(response)
-    except json.JSONDecodeError:
-        payload = {"value": response}
-    
-    is_test = bool(payload.get("test", False))
-    autofit_column = bool(payload.get("autofitcolumn", True))
-    
-    root_path = ctx.target_path
-    if not root_path.exists() or not root_path.is_dir():
-        raise ValueError(f"Target must be a directory. Received: {root_path}")
-
-    if platform.system().lower() != "windows":
-        api.log(
-            "warn",
-            "Moonbug Excel conversion requires Windows (win32com). Running dry mode only.",
-        )
-        api.emit_result(
-            {
-                "dry_run": True,
-                "target": str(root_path),
-                "test": is_test,
-                "autofitcolumn": autofit_column,
-                "files_found": len(sorted(root_path.rglob("*.xls*"))),
-            }
-        )
-        api.exit(code=0)
-        return
-
-    xl_files = sorted(root_path.rglob("*.xls*"))
-    total_files = len(xl_files)
-    if is_test:
-        xl_files = xl_files[0:1]
-        total_files = 1
-        api.log("info", "Running in test mode: only processing first file.")
-    else:
-        api.log("info", f"Moonbug Excel to PDF | Files found={total_files}")
-
-    xl_window = _start_excel()
-
-    try:
-        for index, file in enumerate(xl_files, start=1):
-            api.progress(current=index, total=total_files, unit="files")
-            workbook = None
-            try:
-                workbook = xl_window.Workbooks.Open(str(file), UpdateLinks=0)
-                worksheet = workbook.Worksheets(1)
-                print_area = _get_print_area(worksheet)
-                _page_setup(worksheet, print_area, autofit_column)
-                file_name = _get_outfile_from_cells(worksheet)
-                destination = _build_destination(root_path, file_name, ".pdf")
-                _export_pdf(worksheet, destination)
-            except Exception as e:
-                api.log("warn", f"Failed to process '{file}': {e}")
-            finally:
-                if workbook is not None:
-                    workbook.Close(SaveChanges=False)
-    finally:
-        xl_window.Application.Quit()
-
-    api.emit_result(
-        {
-            "dry_run": False,
-            "target": str(root_path),
-            "test": is_test,
-            "autofitcolumn": autofit_column,
-            "files_converted": total_files,
-        }
-    )
-    api.exit(code=0)
-
-
 def _start_excel() -> client.CDispatch:
     """Start Excel app hidden in the background with suppressed alerts."""
     from win32com import client
@@ -209,6 +113,102 @@ def _build_destination(directory: Path, base: str, suffix: str) -> Path:
 def _export_pdf(worksheet, out_file):
     """Export Excel worksheet to pdf."""
     worksheet.ExportAsFixedFormat(0, str(out_file))
+
+
+@sdk.script
+def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    response = api.request_input(
+        "Options for Moonbug Excel to PDF script",
+        id="moonbug_excel_to_pdf_options",
+        fields=[
+            {
+                "id": "test", 
+                "type": "bool", 
+                "label": "Test mode", 
+                "default": False
+            },
+            {
+                "id": "autofitcolumn", 
+                "type": "bool", 
+                "label": "Autofit columns", 
+                "default": True
+            }
+        ],
+        show_text_input=False 
+    )
+    if response is None:
+        api.exit(code=1)
+        return
+    try:
+        payload = json.loads(response)
+    except json.JSONDecodeError:
+        payload = {"value": response}
+    
+    is_test = bool(payload.get("test", False))
+    autofit_column = bool(payload.get("autofitcolumn", True))
+    
+    root_path = ctx.target_path
+    if not root_path.exists() or not root_path.is_dir():
+        raise ValueError(f"Target must be a directory. Received: {root_path}")
+
+    if platform.system().lower() != "windows":
+        api.log(
+            "warn",
+            "Moonbug Excel conversion requires Windows (win32com). Running dry mode only.",
+        )
+        api.emit_result(
+            {
+                "dry_run": True,
+                "target": str(root_path),
+                "test": is_test,
+                "autofitcolumn": autofit_column,
+                "files_found": len(sorted(root_path.rglob("*.xls*"))),
+            }
+        )
+        api.exit(code=0)
+        return
+
+    xl_files = sorted(root_path.rglob("*.xls*"))
+    total_files = len(xl_files)
+    if is_test:
+        xl_files = xl_files[0:1]
+        total_files = 1
+        api.log("info", "Running in test mode: only processing first file.")
+    else:
+        api.log("info", f"Moonbug Excel to PDF | Files found={total_files}")
+
+    xl_window = _start_excel()
+
+    try:
+        for index, file in enumerate(xl_files, start=1):
+            api.progress(current=index, total=total_files, unit="files")
+            workbook = None
+            try:
+                workbook = xl_window.Workbooks.Open(str(file), UpdateLinks=0)
+                worksheet = workbook.Worksheets(1)
+                print_area = _get_print_area(worksheet)
+                _page_setup(worksheet, print_area, autofit_column)
+                file_name = _get_outfile_from_cells(worksheet)
+                destination = _build_destination(root_path, file_name, ".pdf")
+                _export_pdf(worksheet, destination)
+            except Exception as e:
+                api.log("warn", f"Failed to process '{file}': {e}")
+            finally:
+                if workbook is not None:
+                    workbook.Close(SaveChanges=False)
+    finally:
+        xl_window.Application.Quit()
+
+    api.emit_result(
+        {
+            "dry_run": False,
+            "target": str(root_path),
+            "test": is_test,
+            "autofitcolumn": autofit_column,
+            "files_converted": total_files,
+        }
+    )
+    api.exit(code=0)
 
 
 if __name__ == "__main__":

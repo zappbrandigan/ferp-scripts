@@ -13,6 +13,60 @@ from ferp.fscp.scripts import sdk
 SUPPORTED_EXTS = {".csv", ".xlsx"}
 
 
+def _read_header(path: Path) -> List[str]:
+    if path.suffix.lower() == ".csv":
+        with path.open("r", newline="", encoding="utf-8") as fh:
+            reader = csv.reader(fh)
+            try:
+                header = next(reader)
+            except StopIteration as exc:  # noqa: B904
+                raise ValueError("File is empty") from exc
+            return header
+    return _read_xlsx_header(path)
+
+
+def _read_xlsx_header(path: Path) -> List[str]:
+    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    sheet = workbook.active
+    if sheet is None:
+        raise ValueError("Workbook has no active sheet")
+    header_row = next(sheet.iter_rows(max_row=1, values_only=True), None)
+    if header_row is None:
+        raise ValueError("File is empty")
+    return ["" if cell is None else str(cell) for cell in header_row]
+
+
+def _iter_rows(path: Path) -> Iterator[Iterable[object]]:
+    if path.suffix.lower() == ".csv":
+        with path.open("r", newline="", encoding="utf-8") as fh:
+            reader = csv.reader(fh)
+            next(reader, None)  # skip header
+            for row in reader:
+                yield row
+    else:
+        workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        sheet = workbook.active
+        if sheet is None:
+            raise ValueError("Workbook has no active sheet")
+        first = True
+        for row in sheet.iter_rows(values_only=True):
+            if first:
+                first = False
+                continue
+            yield ["" if cell is None else cell for cell in row]
+
+
+def _next_output_path(root: Path, header: tuple[str, ...]) -> Path:
+    signature = hashlib.sha1("||".join(header).encode("utf-8")).hexdigest()[:10]
+    base_name = f"merged_{signature}.csv"
+    candidate = root / base_name
+    counter = 1
+    while candidate.exists():
+        candidate = root / f"merged_{signature}_{counter}.csv"
+        counter += 1
+    return candidate
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     root = ctx.target_path
@@ -81,60 +135,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         }
     )
     api.exit(code=0)
-
-
-def _read_header(path: Path) -> List[str]:
-    if path.suffix.lower() == ".csv":
-        with path.open("r", newline="", encoding="utf-8") as fh:
-            reader = csv.reader(fh)
-            try:
-                header = next(reader)
-            except StopIteration as exc:  # noqa: B904
-                raise ValueError("File is empty") from exc
-            return header
-    return _read_xlsx_header(path)
-
-
-def _read_xlsx_header(path: Path) -> List[str]:
-    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    sheet = workbook.active
-    if sheet is None:
-        raise ValueError("Workbook has no active sheet")
-    header_row = next(sheet.iter_rows(max_row=1, values_only=True), None)
-    if header_row is None:
-        raise ValueError("File is empty")
-    return ["" if cell is None else str(cell) for cell in header_row]
-
-
-def _iter_rows(path: Path) -> Iterator[Iterable[object]]:
-    if path.suffix.lower() == ".csv":
-        with path.open("r", newline="", encoding="utf-8") as fh:
-            reader = csv.reader(fh)
-            next(reader, None)  # skip header
-            for row in reader:
-                yield row
-    else:
-        workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        sheet = workbook.active
-        if sheet is None:
-            raise ValueError("Workbook has no active sheet")
-        first = True
-        for row in sheet.iter_rows(values_only=True):
-            if first:
-                first = False
-                continue
-            yield ["" if cell is None else cell for cell in row]
-
-
-def _next_output_path(root: Path, header: tuple[str, ...]) -> Path:
-    signature = hashlib.sha1("||".join(header).encode("utf-8")).hexdigest()[:10]
-    base_name = f"merged_{signature}.csv"
-    candidate = root / base_name
-    counter = 1
-    while candidate.exists():
-        candidate = root / f"merged_{signature}_{counter}.csv"
-        counter += 1
-    return candidate
 
 
 if __name__ == "__main__":

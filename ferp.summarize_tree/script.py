@@ -10,37 +10,6 @@ from ferp.fscp.scripts import sdk
 MAX_DEPTH = 4
 
 
-@sdk.script
-def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    root = ctx.target_path
-    if not root.exists() or not root.is_dir():
-        raise ValueError("Select a directory before running this script.")
-
-    summary = []
-    for directory, rel_path, file_counter in _walk(root):
-        total = sum(file_counter.values())
-        entry = {
-            "relative_path": rel_path,
-            "total_files": total,
-            "extensions": dict(sorted(file_counter.items())),
-        }
-        summary.append(entry)
-        ext_details = ", ".join(f"{ext or '<no ext>'}: {count}" for ext, count in entry["extensions"].items())
-        api.log(
-            "info",
-            f"{rel_path or '.'}: {total} file(s)" + (f" ({ext_details})" if ext_details else ""),
-        )
-
-    lines = [_format_entry(entry) for entry in summary]
-
-    api.emit_result({
-        "root": str(root),
-        # "directories": summary,
-        "summary": "\n".join(lines),
-    })
-    api.exit(code=0)
-
-
 def _walk(root: Path) -> Iterator[tuple[Path, str, Counter[str]]]:
     stack: list[tuple[Path, int]] = [(root, 0)]
     while stack:
@@ -83,6 +52,37 @@ def _format_entry(entry: dict[str, object]) -> str:
         ext_lines.append(f"    - {label}: {count}")
     ext_block = "\n".join(ext_lines) if ext_lines else "    - (no files)"
     return f"\n▶ {path} — {total} file(s)\n{ext_block}"
+
+
+@sdk.script
+def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    root = ctx.target_path
+    if not root.exists() or not root.is_dir():
+        raise ValueError("Select a directory before running this script.")
+
+    summary = []
+    for directory, rel_path, file_counter in _walk(root):
+        total = sum(file_counter.values())
+        entry = {
+            "relative_path": rel_path,
+            "total_files": total,
+            "extensions": dict(sorted(file_counter.items())),
+        }
+        summary.append(entry)
+        ext_details = ", ".join(f"{ext or '<no ext>'}: {count}" for ext, count in entry["extensions"].items())
+        api.log(
+            "info",
+            f"{rel_path or '.'}: {total} file(s)" + (f" ({ext_details})" if ext_details else ""),
+        )
+
+    lines = [_format_entry(entry) for entry in summary]
+
+    api.emit_result({
+        "root": str(root),
+        # "directories": summary,
+        "summary": "\n".join(lines),
+    })
+    api.exit(code=0)
 
 
 if __name__ == "__main__":

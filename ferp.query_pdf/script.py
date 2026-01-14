@@ -33,6 +33,83 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _compile_pattern(
+    query: str,
+    use_regex: bool,
+    case_sensitive: bool,
+    api: sdk.ScriptAPI,
+) -> re.Pattern[str] | None:
+    flags = 0 if case_sensitive else re.IGNORECASE
+    try:
+        if use_regex:
+            return re.compile(query, flags)
+        return re.compile(re.escape(query), flags)
+    except re.error as exc:
+        api.log("error", f"Invalid regular expression '{query}': {exc}")
+        return None
+
+
+def _process_pdf(
+    pdf_path: Path,
+    root: Path,
+    pattern: re.Pattern[str],
+    context_chars: int,
+    api: sdk.ScriptAPI,
+) -> list[dict[str, object]]:
+    reader = PdfReader(str(pdf_path))
+    if reader.is_encrypted:
+        api.log("warning", f"Skipping encrypted PDF: {pdf_path.name}")
+        return []
+
+    pdf_matches: list[dict[str, object]] = []
+    relative_path = pdf_path.relative_to(root)
+
+    for page_number, page in enumerate(reader.pages, start=1):
+        try:
+            text = page.extract_text() or ""
+        except Exception as exc:  # noqa: BLE001
+            api.log("warning", f"Text extraction failed for '{pdf_path.name}' (page {page_number}): {exc}")
+            continue
+
+        if not text:
+            continue
+
+        for match in pattern.finditer(text):
+            span = match.span()
+            context = _extract_context(text, span[0], span[1], context_chars)
+            pdf_matches.append(
+                {
+                    "file_name": pdf_path.name,
+                    "relative_path": str(relative_path),
+                    "page_number": page_number,
+                    "match_text": match.group(0),
+                    "context_excerpt": context,
+                }
+            )
+
+    if not pdf_matches:
+        api.log("info", f"No matches found in {pdf_path.name}")
+
+    return pdf_matches
+
+
+def _extract_context(text: str, start: int, end: int, context_chars: int) -> str:
+    left = max(0, start - context_chars)
+    right = min(len(text), end + context_chars)
+    snippet = text[left:right].replace("\n", " ").strip()
+    return snippet
+
+
+def _write_csv(csv_path: Path, rows: list[dict[str, object]]) -> None:
+    fieldnames = ["file_name", "relative_path", "page_number", "match_text", "context_excerpt"]
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    with csv_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     parser = _build_parser()
@@ -131,83 +208,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         }
     )
     api.exit(code=0)
-
-
-def _compile_pattern(
-    query: str,
-    use_regex: bool,
-    case_sensitive: bool,
-    api: sdk.ScriptAPI,
-) -> re.Pattern[str] | None:
-    flags = 0 if case_sensitive else re.IGNORECASE
-    try:
-        if use_regex:
-            return re.compile(query, flags)
-        return re.compile(re.escape(query), flags)
-    except re.error as exc:
-        api.log("error", f"Invalid regular expression '{query}': {exc}")
-        return None
-
-
-def _process_pdf(
-    pdf_path: Path,
-    root: Path,
-    pattern: re.Pattern[str],
-    context_chars: int,
-    api: sdk.ScriptAPI,
-) -> list[dict[str, object]]:
-    reader = PdfReader(str(pdf_path))
-    if reader.is_encrypted:
-        api.log("warning", f"Skipping encrypted PDF: {pdf_path.name}")
-        return []
-
-    pdf_matches: list[dict[str, object]] = []
-    relative_path = pdf_path.relative_to(root)
-
-    for page_number, page in enumerate(reader.pages, start=1):
-        try:
-            text = page.extract_text() or ""
-        except Exception as exc:  # noqa: BLE001
-            api.log("warning", f"Text extraction failed for '{pdf_path.name}' (page {page_number}): {exc}")
-            continue
-
-        if not text:
-            continue
-
-        for match in pattern.finditer(text):
-            span = match.span()
-            context = _extract_context(text, span[0], span[1], context_chars)
-            pdf_matches.append(
-                {
-                    "file_name": pdf_path.name,
-                    "relative_path": str(relative_path),
-                    "page_number": page_number,
-                    "match_text": match.group(0),
-                    "context_excerpt": context,
-                }
-            )
-
-    if not pdf_matches:
-        api.log("info", f"No matches found in {pdf_path.name}")
-
-    return pdf_matches
-
-
-def _extract_context(text: str, start: int, end: int, context_chars: int) -> str:
-    left = max(0, start - context_chars)
-    right = min(len(text), end + context_chars)
-    snippet = text[left:right].replace("\n", " ").strip()
-    return snippet
-
-
-def _write_csv(csv_path: Path, rows: list[dict[str, object]]) -> None:
-    fieldnames = ["file_name", "relative_path", "page_number", "match_text", "context_excerpt"]
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    with csv_path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
 
 
 if __name__ == "__main__":

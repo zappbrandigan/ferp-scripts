@@ -52,8 +52,8 @@ def _backup(target_dir: Path, api: sdk.ScriptAPI) -> None:
 
 
 @sdk.script
-def main(context: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    _backup(context.target_path, api)
+def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    _backup(ctx.target_path, api)
 
 
 if __name__ == "__main__":

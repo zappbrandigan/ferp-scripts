@@ -43,75 +43,6 @@ class FileOutcome:
     reason: str | None = None
 
 
-@sdk.script
-def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    root = ctx.target_path
-    if not root.exists() or not root.is_dir():
-        raise ValueError("Select a directory before running this script.")
-
-    outcomes: list[FileOutcome] = []
-    check_dir = root / "_check"
-
-    try:
-        entries = list(_iter_directory(root))
-    except PermissionError:
-        raise ValueError("Permission denied while listing directory.")
-
-    total_entries = len(entries) or 1
-
-    for index, entry in enumerate(entries, start=1):
-        path = Path(entry.path)
-        
-        if total_entries > 1:
-            api.progress(current=index, total=total_entries, unit="files")
-
-        if entry.is_symlink() and not path.exists():
-            _record_move(outcomes, path, path, check_dir, "broken_symlink")
-            continue
-
-        stem = path.stem
-        parsed, reason = _parse_name(stem)
-        if not parsed:
-            _record_move(outcomes, path, path, check_dir, reason or "unrepairable_structure")
-            continue
-
-        normalized, normalize_reason = _normalize_name(parsed)
-        if not normalized:
-            _record_move(outcomes, path, path, check_dir, normalize_reason or "unrepairable_structure")
-            continue
-
-        if normalized == stem:
-            outcomes.append(FileOutcome("valid", path, None))
-            continue
-
-        target = path.with_name(f"{normalized}{path.suffix}")
-        collision = False
-        try:
-            destination = _safe_rename(path, target)
-        except PermissionError:
-            _record_move(outcomes, path, path, check_dir, "permission_error")
-            continue
-        except OSError as exc:
-            _record_move(outcomes, path, path, check_dir, f"other_error: {exc}")
-            continue
-
-        if destination != target:
-            collision = True
-
-        if collision:
-            _record_move(outcomes, path, destination, check_dir, "collision")
-        else:
-            outcomes.append(FileOutcome("renamed", path, destination))
-
-
-    summary = _build_report(root, outcomes)
-    if _GOOGLETRANS_IMPORT_ERROR:
-        api.log("warn", "googletrans not available; article repositioning skipped.")
-    api.log("info", summary)
-    api.emit_result({"report": summary})
-    api.exit(code=0)
-
-
 def _iter_directory(root: Path) -> Iterable[os.DirEntry[str]]:
     with os.scandir(root) as entries:
         for entry in entries:
@@ -470,6 +401,75 @@ def _rel(root: Path, path: Path | None) -> str:
         return str(path.relative_to(root))
     except ValueError:
         return str(path)
+
+
+@sdk.script
+def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    root = ctx.target_path
+    if not root.exists() or not root.is_dir():
+        raise ValueError("Select a directory before running this script.")
+
+    outcomes: list[FileOutcome] = []
+    check_dir = root / "_check"
+
+    try:
+        entries = list(_iter_directory(root))
+    except PermissionError:
+        raise ValueError("Permission denied while listing directory.")
+
+    total_entries = len(entries) or 1
+
+    for index, entry in enumerate(entries, start=1):
+        path = Path(entry.path)
+        
+        if total_entries > 1:
+            api.progress(current=index, total=total_entries, unit="files")
+
+        if entry.is_symlink() and not path.exists():
+            _record_move(outcomes, path, path, check_dir, "broken_symlink")
+            continue
+
+        stem = path.stem
+        parsed, reason = _parse_name(stem)
+        if not parsed:
+            _record_move(outcomes, path, path, check_dir, reason or "unrepairable_structure")
+            continue
+
+        normalized, normalize_reason = _normalize_name(parsed)
+        if not normalized:
+            _record_move(outcomes, path, path, check_dir, normalize_reason or "unrepairable_structure")
+            continue
+
+        if normalized == stem:
+            outcomes.append(FileOutcome("valid", path, None))
+            continue
+
+        target = path.with_name(f"{normalized}{path.suffix}")
+        collision = False
+        try:
+            destination = _safe_rename(path, target)
+        except PermissionError:
+            _record_move(outcomes, path, path, check_dir, "permission_error")
+            continue
+        except OSError as exc:
+            _record_move(outcomes, path, path, check_dir, f"other_error: {exc}")
+            continue
+
+        if destination != target:
+            collision = True
+
+        if collision:
+            _record_move(outcomes, path, destination, check_dir, "collision")
+        else:
+            outcomes.append(FileOutcome("renamed", path, destination))
+
+
+    summary = _build_report(root, outcomes)
+    if _GOOGLETRANS_IMPORT_ERROR:
+        api.log("warn", "googletrans not available; article repositioning skipped.")
+    api.log("info", summary)
+    api.emit_result({"report": summary})
+    api.exit(code=0)
 
 
 if __name__ == "__main__":

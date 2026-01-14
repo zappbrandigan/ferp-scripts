@@ -29,8 +29,8 @@ def _build_destination(directory: Path, base: str, suffix: str) -> Path:
 
 
 @sdk.script
-def main(context: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    target_dir = Path(context.target_path)
+def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    target_dir = Path(ctx.target_path)
 
     if not target_dir.exists() or not target_dir.is_dir():
         raise RuntimeError(f"Target directory '{target_dir}' is not accessible.")

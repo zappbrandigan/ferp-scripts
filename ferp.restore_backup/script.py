@@ -65,8 +65,8 @@ def _restore(backup_path: Path, api: sdk.ScriptAPI) -> None:
 
 
 @sdk.script
-def main(context: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    _restore(context.target_path, api)
+def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    _restore(ctx.target_path, api)
 
 
 if __name__ == "__main__":

@@ -82,8 +82,8 @@ def _extract(zip_path: Path, api: sdk.ScriptAPI) -> None:
 
 
 @sdk.script
-def main(context: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    _extract(context.target_path, api)
+def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    _extract(ctx.target_path, api)
 
 
 if __name__ == "__main__":

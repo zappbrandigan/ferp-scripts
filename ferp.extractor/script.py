@@ -11,6 +11,27 @@ from ferp.fscp.scripts import sdk
 SKIP_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif"}
 
 
+def _extract_from_msg(msg_file: Path, output_dir: Path) -> int:
+    msg = extract_msg.Message(str(msg_file))
+    attachments = list(msg.attachments)
+
+    email_output_dir = output_dir / msg_file.stem
+    email_output_dir.mkdir(parents=True, exist_ok=True)
+
+    saved = 0
+    for attachment in attachments:
+        name = attachment.longFilename or attachment.shortFilename
+        if not name:
+            continue
+        ext = Path(name).suffix.lower()
+        if ext in SKIP_EXTENSIONS:
+            continue
+        attachment.save(customPath=email_output_dir)
+        saved += 1
+
+    return saved
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     zip_path = ctx.target_path
@@ -65,26 +86,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     )
     api.exit(code=0)
 
-
-def _extract_from_msg(msg_file: Path, output_dir: Path) -> int:
-    msg = extract_msg.Message(str(msg_file))
-    attachments = list(msg.attachments)
-
-    email_output_dir = output_dir / msg_file.stem
-    email_output_dir.mkdir(parents=True, exist_ok=True)
-
-    saved = 0
-    for attachment in attachments:
-        name = attachment.longFilename or attachment.shortFilename
-        if not name:
-            continue
-        ext = Path(name).suffix.lower()
-        if ext in SKIP_EXTENSIONS:
-            continue
-        attachment.save(customPath=email_output_dir)
-        saved += 1
-
-    return saved
 
 if __name__ == "__main__":
     main()

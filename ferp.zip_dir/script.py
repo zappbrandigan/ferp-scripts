@@ -19,8 +19,8 @@ def _collect_entries(target_dir: Path, zip_path: Path) -> list[Path]:
 
 
 @sdk.script
-def main(context: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    target_dir = context.target_path
+def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    target_dir = ctx.target_path
 
     if not target_dir.exists() or not target_dir.is_dir():
         raise ValueError(f"{target_dir} is not a directory")
