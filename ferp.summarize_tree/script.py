@@ -47,7 +47,7 @@ def _build_summary_table(entries: list[dict[str, object]]) -> str:
     headers = ["Directory", "Files", "Extension", "Count"]
     rows: list[list[str]] = []
     for entry in entries:
-        path = entry["relative_path"] or "."
+        path = cast(str, entry["relative_path"] or ".")
         total = entry["total_files"]
         extensions = cast(dict, entry["extensions"])
         if extensions:
