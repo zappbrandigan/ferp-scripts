@@ -2,7 +2,7 @@
   "scripts": [
     {
       "id": "ferp.zip_dir",
-      "name": "Directory: Zip",
+      "name": "Compress: Zip",
       "version": "1.0.0",
       "type": "python",
       "script": {
@@ -17,7 +17,7 @@
     },
     {
       "id": "ferp.unzip_file",
-      "name": "Directory: Unzip",
+      "name": "Compress: Unzip",
       "version": "1.0.0",
       "type": "python",
       "script": {
@@ -45,7 +45,7 @@
     },
     {
       "id": "ferp.backup_dir",
-      "name": "Directory: Backup",
+      "name": "Archive: Backup",
       "version": "1.0.0",
       "type": "python",
       "script": {
@@ -60,7 +60,7 @@
     },
     {
       "id": "ferp.restore_backup",
-      "name": "Directory: Restore Backup",
+      "name": "Archive: Restore Backup",
       "version": "1.0.0",
       "type": "python",
       "script": {
@@ -90,7 +90,7 @@
     },
     {
       "id": "ferp.flatten_dir",
-      "name": "Directory: Flatten",
+      "name": "Normalize: Flatten",
       "version": "1.0.0",
       "type": "python",
       "script": {
@@ -196,6 +196,5 @@
       "requires_input": true,
       "target": "highlighted_file"
     }
-  ],
-  "publishers_file": "data/cache/publishers_chache.json"
+  ]
 }

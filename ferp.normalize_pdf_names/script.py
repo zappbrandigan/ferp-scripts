@@ -17,7 +17,7 @@ except Exception:  # pragma: no cover - optional dependency
 else:
     _GOOGLETRANS_IMPORT_ERROR = False
 
-from ferp.data.articles import languageArticles
+from ferp.resources.articles import language_articles
 from ferp.fscp.scripts import sdk
 
 MAX_FILENAME_LENGTH = 60
@@ -230,7 +230,7 @@ def _detect_language(text: str) -> str | None:
     lang = getattr(result, "lang", None)
     if not isinstance(lang, str):
         return None
-    if lang not in languageArticles:
+    if lang not in language_articles:
         return None
     return lang
 
@@ -240,7 +240,7 @@ def _reposition_article(text: str) -> str:
     if not lang:
         return text
 
-    articles = languageArticles.get(lang, [])
+    articles = language_articles.get(lang, [])
     tokens = text.split()
     if not tokens:
         return text
