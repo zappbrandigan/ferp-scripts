@@ -144,7 +144,7 @@
     },
     {
       "id": "ferp.normalize_pdf_names",
-      "name": "Rename: Cue Sheets",
+      "name": "Normalize: Cue Sheets File Names",
       "version": "1.0.0",
       "type": "python",
       "script": {
@@ -191,6 +191,19 @@
       "script": {
         "windows": "scripts/ferp.moonbug/script.py",
         "other": "scripts/ferp.moonbug/script.py"
+      },
+      "args": [],
+      "requires_input": true,
+      "target": "highlighted_file"
+    },
+    {
+      "id": "ferp.rename_uvs",
+      "name": "Rename: UVS",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.rename_uvs/script.py",
+        "other": "scripts/ferp.rename_uvs/script.py"
       },
       "args": [],
       "requires_input": true,

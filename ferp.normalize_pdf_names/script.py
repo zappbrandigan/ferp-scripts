@@ -17,14 +17,37 @@ except Exception:  # pragma: no cover - optional dependency
 else:
     _GOOGLETRANS_IMPORT_ERROR = False
 
+from unidecode import unidecode
+
 from ferp.resources.articles import language_articles
 from ferp.fscp.scripts import sdk
 
 MAX_FILENAME_LENGTH = 60
 PRODUCTION_DELIM = "   "
 EPISODE_DELIM = "  "
+ELLIPSIS = ". . ."
+ELLIPSIS_LEN = len(ELLIPSIS)
 SPACE_RUN_RE = re.compile(r"( {2,})")
+PROGRESS_EVERY = 50
 T = TypeVar("T")
+_ASCII_PUNCT_TRANSLATION = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2026": ". . .",
+        "\u00a0": " ",
+    }
+)
+_ARTICLE_MATCH_TRANSLATION = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+    }
+)
 
 
 @dataclass
@@ -92,13 +115,19 @@ def _normalize_name(parsed: ParsedName) -> tuple[str | None, str | None]:
         return None, "unrepairable_structure"
 
     production = _reposition_article(production)
+    production = _normalize_ascii(production)
+    if not production:
+        return None, "unrepairable_structure"
     production = production.upper()
 
     episode_title = None
     episode_info = None
 
     if parsed.shape == "show_no_episode":
-        episode_info = (parsed.episode_info or "").strip()
+        episode_info = _normalize_ellipsis((parsed.episode_info or "").strip())
+        if not episode_info:
+            return None, "unrepairable_structure"
+        episode_info = _normalize_episode_token(episode_info)
         if not episode_info:
             return None, "unrepairable_structure"
     elif parsed.shape == "show_with_episode":
@@ -106,9 +135,18 @@ def _normalize_name(parsed: ParsedName) -> tuple[str | None, str | None]:
         if not raw_title:
             return None, "unrepairable_structure"
         episode_title = _reposition_article(raw_title)
+        episode_title = _normalize_ascii(episode_title)
+        if not episode_title:
+            return None, "unrepairable_structure"
         episode_title = string.capwords(episode_title, sep=" ")
 
-        episode_info = (parsed.episode_info or "").strip()
+        episode_info = _normalize_ellipsis((parsed.episode_info or "").strip())
+        if not episode_info:
+            return None, "unrepairable_structure"
+        episode_info = _normalize_episode_token(episode_info)
+        if not episode_info:
+            return None, "unrepairable_structure"
+        episode_info = _normalize_ascii(episode_info)
         if not episode_info:
             return None, "unrepairable_structure"
     else:
@@ -125,7 +163,42 @@ def _normalize_name(parsed: ParsedName) -> tuple[str | None, str | None]:
 
 
 def _normalize_spaces(value: str) -> str:
-    return " ".join(value.split())
+    return " ".join(_normalize_ellipsis(value).split())
+
+
+def _normalize_ellipsis(value: str) -> str:
+    return value.replace("...", ELLIPSIS)
+
+
+def _normalize_episode_token(value: str) -> str:
+    match = re.match(r"^\s*ep\s*no\.?\s*(.+)$", value, flags=re.IGNORECASE)
+    if not match:
+        return value
+    remainder = match.group(1).strip()
+    if not remainder:
+        return value
+    remainder = re.sub(r"\s+", " ", remainder)
+    compound = re.match(
+        r"^(\d+)([a-zA-Z])\s*&\s*(\d+)([a-zA-Z])$",
+        remainder,
+    )
+    if compound:
+        left_num, left_suffix, right_num, right_suffix = compound.groups()
+        remainder = f"{left_num}{left_suffix.upper()} - {right_num}{right_suffix.upper()}"
+    else:
+        remainder = re.sub(
+            r"^(\d+)([a-zA-Z])$",
+            lambda m: f"{m.group(1)}{m.group(2).upper()}",
+            remainder,
+        )
+
+    remainder = re.sub(r"\b(vrsn|version)\b$", "Vrsn", remainder, flags=re.IGNORECASE)
+    return f"Ep No. {remainder}"
+
+
+def _normalize_ascii(value: str) -> str:
+    translated = value.translate(_ASCII_PUNCT_TRANSLATION)
+    return unidecode(translated)
 
 
 def _format_name(parts: ParsedName) -> str:
@@ -156,7 +229,7 @@ def _enforce_length(parts: ParsedName) -> str | None:
         return None
 
     if parts.shape == "film":
-        shortened = _shorten(parts.production, MAX_FILENAME_LENGTH, min_visible=1)
+        shortened = _shorten(parts.production, MAX_FILENAME_LENGTH, min_visible=3)
         if not shortened:
             return "length_limit"
         parts.production = shortened
@@ -164,24 +237,44 @@ def _enforce_length(parts: ParsedName) -> str | None:
 
     if parts.shape == "show_no_episode":
         allowed = MAX_FILENAME_LENGTH - (len(PRODUCTION_DELIM) + len(info))
-        if allowed < 3:
-            return "length_limit"
-        shortened = _shorten(parts.production, allowed, min_visible=1)
+        if allowed < (1 + ELLIPSIS_LEN):
+            max_info_len = MAX_FILENAME_LENGTH - (len(PRODUCTION_DELIM) + 1)
+            if max_info_len < (1 + ELLIPSIS_LEN):
+                return "length_limit"
+            shortened_info = _shorten(info, max_info_len, min_visible=1)
+            if not shortened_info:
+                return "length_limit"
+            info = shortened_info
+            parts.episode_info = shortened_info
+            allowed = MAX_FILENAME_LENGTH - (len(PRODUCTION_DELIM) + len(info))
+        shortened = _shorten(parts.production, allowed, min_visible=3)
         if not shortened:
             return "length_limit"
         parts.production = shortened
+        if total_length() <= MAX_FILENAME_LENGTH:
+            return None
+        max_info_len = MAX_FILENAME_LENGTH - (len(PRODUCTION_DELIM) + len(parts.production))
+        shortened_info = _shorten(info, max_info_len, min_visible=1)
+        if not shortened_info:
+            return "length_limit"
+        parts.episode_info = shortened_info
         return None if total_length() <= MAX_FILENAME_LENGTH else "length_limit"
 
     # show_with_episode
+    if total_length() <= MAX_FILENAME_LENGTH:
+        return None
+
+    min_episode_len = 3 + ELLIPSIS_LEN
     available_for_episode = MAX_FILENAME_LENGTH - (
         len(parts.production) + len(PRODUCTION_DELIM) + len(EPISODE_DELIM) + len(info)
     )
-    if available_for_episode < 6:
-        return "length_limit"
-    updated_episode = _shorten(parts.episode_title or "", available_for_episode, min_visible=3)
-    if not updated_episode:
-        return "length_limit"
-    parts.episode_title = updated_episode
+    if parts.episode_title:
+        target_len = max(min_episode_len, available_for_episode)
+        if len(parts.episode_title) > target_len:
+            updated_episode = _shorten(parts.episode_title, target_len, min_visible=3)
+            if not updated_episode:
+                return "length_limit"
+            parts.episode_title = updated_episode
 
     if total_length() <= MAX_FILENAME_LENGTH:
         return None
@@ -189,29 +282,61 @@ def _enforce_length(parts: ParsedName) -> str | None:
     available_for_production = MAX_FILENAME_LENGTH - (
         len(PRODUCTION_DELIM) + len(parts.episode_title or "") + len(EPISODE_DELIM) + len(info)
     )
-    if available_for_production < 3:
-        return "length_limit"
-    shortened_prod = _shorten(parts.production, available_for_production, min_visible=1)
+    if available_for_production < (1 + ELLIPSIS_LEN):
+        max_info_len = MAX_FILENAME_LENGTH - (
+            len(PRODUCTION_DELIM) + len(parts.episode_title or "") + len(EPISODE_DELIM) + 1
+        )
+        if max_info_len < (1 + ELLIPSIS_LEN):
+            return "length_limit"
+        shortened_info = _shorten(info, max_info_len, min_visible=1)
+        if not shortened_info:
+            return "length_limit"
+        info = shortened_info
+        parts.episode_info = shortened_info
+        available_for_production = MAX_FILENAME_LENGTH - (
+            len(PRODUCTION_DELIM) + len(parts.episode_title or "") + len(EPISODE_DELIM) + len(info)
+        )
+        if available_for_production < (1 + ELLIPSIS_LEN):
+            return "length_limit"
+    shortened_prod = _shorten(parts.production, available_for_production, min_visible=3)
     if not shortened_prod:
         return "length_limit"
     parts.production = shortened_prod
+    if total_length() <= MAX_FILENAME_LENGTH:
+        return None
+    max_info_len = MAX_FILENAME_LENGTH - (
+        len(parts.production) + len(PRODUCTION_DELIM) + len(parts.episode_title or "") + len(EPISODE_DELIM)
+    )
+    if max_info_len < (1 + ELLIPSIS_LEN):
+        return "length_limit"
+    shortened_info = _shorten(info, max_info_len, min_visible=1)
+    if not shortened_info:
+        return "length_limit"
+    parts.episode_info = shortened_info
     return None if total_length() <= MAX_FILENAME_LENGTH else "length_limit"
 
 
 def _shorten(text: str, limit: int, *, min_visible: int) -> str | None:
     if len(text) <= limit:
         return text
-    visible = limit - 3
+    visible = limit - ELLIPSIS_LEN
     if visible < min_visible:
         return None
-    base = text[:visible]
+    base = _trim_trailing_suffix(text[:visible], min_visible)
     trimmed = _trim_trailing_special(base, min_visible)
-    return f"{trimmed}..."
+    return f"{trimmed}{ELLIPSIS}"
 
 
 def _trim_trailing_special(text: str, min_visible: int) -> str:
     chars = list(text)
     while len(chars) > min_visible and chars and not chars[-1].isalnum():
+        chars.pop()
+    return "".join(chars)
+
+
+def _trim_trailing_suffix(text: str, min_visible: int) -> str:
+    chars = list(text)
+    while len(chars) > min_visible and chars and chars[-1] in {"-", "_", ",", ".", "'", " "}:
         chars.pop()
     return "".join(chars)
 
@@ -248,7 +373,16 @@ def _reposition_article(text: str) -> str:
     first = tokens[0]
     article = _match_article(first, articles)
     if not article:
-        return text
+        prefixed = _match_article_prefix(first, articles)
+        if not prefixed:
+            return text
+        prefix, remainder = prefixed
+        if not remainder:
+            return text
+        rest = " ".join([remainder, *tokens[1:]]).strip()
+        if not rest:
+            return text
+        return f"{rest}, {prefix}"
 
     rest = " ".join(tokens[1:]).strip()
     if not rest:
@@ -258,9 +392,22 @@ def _reposition_article(text: str) -> str:
 
 
 def _match_article(token: str, articles: list[str]) -> str | None:
+    normalized_token = token.translate(_ARTICLE_MATCH_TRANSLATION).lower()
     for article in articles:
-        if token.lower() == article.lower():
+        if normalized_token == article.lower():
             return article
+    return None
+
+
+def _match_article_prefix(token: str, articles: list[str]) -> tuple[str, str] | None:
+    lowered = token.translate(_ARTICLE_MATCH_TRANSLATION).lower()
+    for article in articles:
+        if not article.endswith("'"):
+            continue
+        if lowered.startswith(article.lower()):
+            prefix = token[: len(article)]
+            remainder = token[len(article):]
+            return prefix, remainder
     return None
 
 
@@ -337,61 +484,31 @@ def _record_move(
     check_dir: Path,
     reason: str,
     target_name: str | None = None,
-) -> None:
+) -> FileOutcome:
     try:
         dest = _move_to_check(current_path, check_dir, target_name)
     except PermissionError:
-        outcomes.append(FileOutcome("moved", original_path, None, "permission_error"))
+        outcome = FileOutcome("moved", original_path, None, "permission_error")
     except OSError as exc:
-        outcomes.append(FileOutcome("moved", original_path, None, f"other_error: {exc}"))
+        outcome = FileOutcome("moved", original_path, None, f"other_error: {exc}")
     else:
-        outcomes.append(FileOutcome("moved", original_path, dest, reason))
+        outcome = FileOutcome("moved", original_path, dest, reason)
+    outcomes.append(outcome)
+    return outcome
 
 
-def _build_report(root: Path, outcomes: list[FileOutcome]) -> str:
+def _build_summary(outcomes: list[FileOutcome]) -> str:
     valid = [out for out in outcomes if out.kind == "valid"]
     renamed = [out for out in outcomes if out.kind == "renamed"]
     moved = [out for out in outcomes if out.kind == "moved"]
 
-    lines = [
-        f"\nValid: {len(valid)}",
-        f"Renamed: {len(renamed)}",
-        f"Moved: {len(moved)}",
-    ]
-
-    def add_blocks(title: str, blocks: list[list[tuple[str, str]]]) -> None:
-        if not blocks:
-            return
-        lines.append("---")
-        lines.append(title)
-        for block in blocks:
-            for label, value in block:
-                lines.append(f"{label}: {value}")
-            lines.append("---")
-
-    renamed_blocks = [
+    return "\n".join(
         [
-            ("from", _rel(root, out.source)),
-            ("to", _rel(root, out.destination)),
+            f"\nValid: {len(valid)}",
+            f"Renamed: {len(renamed)}",
+            f"Moved: {len(moved)}",
         ]
-        for out in renamed
-    ]
-    moved_blocks = [
-        [
-            ("from", _rel(root, out.source)),
-            ("to", _rel(root, out.destination)),
-            ("reason", out.reason or ""),
-        ]
-        for out in moved
-    ]
-
-    add_blocks("Renamed Files", renamed_blocks)
-    add_blocks("Moved to _check", moved_blocks)
-
-    if lines and lines[-1] == "---":
-        lines.pop()
-
-    return "\n".join(lines)
+    )
 
 
 def _rel(root: Path, path: Path | None) -> str:
@@ -422,22 +539,50 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     for index, entry in enumerate(entries, start=1):
         path = Path(entry.path)
         
-        if total_entries > 1:
+        if total_entries > 1 and (index == total_entries or index % PROGRESS_EVERY == 0):
             api.progress(current=index, total=total_entries, unit="files")
 
         if entry.is_symlink() and not path.exists():
-            _record_move(outcomes, path, path, check_dir, "broken_symlink")
+            outcome = _record_move(outcomes, path, path, check_dir, "broken_symlink")
+            api.log(
+                "info",
+                (
+                    "Moved to _check: "
+                    f"{_rel(root, outcome.source)} -> {_rel(root, outcome.destination)} "
+                    f"(reason: {outcome.reason or 'unknown'})"
+                ),
+            )
             continue
 
         stem = path.stem
         parsed, reason = _parse_name(stem)
         if not parsed:
-            _record_move(outcomes, path, path, check_dir, reason or "unrepairable_structure")
+            outcome = _record_move(
+                outcomes, path, path, check_dir, reason or "unrepairable_structure"
+            )
+            api.log(
+                "info",
+                (
+                    "Moved to _check: "
+                    f"{_rel(root, outcome.source)} -> {_rel(root, outcome.destination)} "
+                    f"(reason: {outcome.reason or 'unknown'})"
+                ),
+            )
             continue
 
         normalized, normalize_reason = _normalize_name(parsed)
         if not normalized:
-            _record_move(outcomes, path, path, check_dir, normalize_reason or "unrepairable_structure")
+            outcome = _record_move(
+                outcomes, path, path, check_dir, normalize_reason or "unrepairable_structure"
+            )
+            api.log(
+                "info",
+                (
+                    "Moved to _check: "
+                    f"{_rel(root, outcome.source)} -> {_rel(root, outcome.destination)} "
+                    f"(reason: {outcome.reason or 'unknown'})"
+                ),
+            )
             continue
 
         if normalized == stem:
@@ -445,29 +590,98 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             continue
 
         target = path.with_name(f"{normalized}{path.suffix}")
+        try:
+            same_file = target.exists() and target.samefile(path)
+        except FileNotFoundError:
+            same_file = False
+
+        if target.exists() and not same_file:
+            existing = _record_move(
+                outcomes,
+                target,
+                target,
+                check_dir,
+                "collision_existing",
+            )
+            api.log(
+                "info",
+                (
+                    "Moved to _check: "
+                    f"{_rel(root, existing.source)} -> {_rel(root, existing.destination)} "
+                    f"(reason: {existing.reason or 'unknown'})"
+                ),
+            )
+            outcome = _record_move(
+                outcomes,
+                path,
+                path,
+                check_dir,
+                "collision",
+                target_name=target.name,
+            )
+            api.log(
+                "info",
+                (
+                    "Moved to _check: "
+                    f"{_rel(root, outcome.source)} -> {_rel(root, outcome.destination)} "
+                    f"(reason: {outcome.reason or 'unknown'})"
+                ),
+            )
+            continue
+
         collision = False
         try:
             destination = _safe_rename(path, target)
         except PermissionError:
-            _record_move(outcomes, path, path, check_dir, "permission_error")
+            outcome = _record_move(outcomes, path, path, check_dir, "permission_error")
+            api.log(
+                "info",
+                (
+                    "Moved to _check: "
+                    f"{_rel(root, outcome.source)} -> {_rel(root, outcome.destination)} "
+                    f"(reason: {outcome.reason or 'unknown'})"
+                ),
+            )
             continue
         except OSError as exc:
-            _record_move(outcomes, path, path, check_dir, f"other_error: {exc}")
+            outcome = _record_move(outcomes, path, path, check_dir, f"other_error: {exc}")
+            api.log(
+                "info",
+                (
+                    "Moved to _check: "
+                    f"{_rel(root, outcome.source)} -> {_rel(root, outcome.destination)} "
+                    f"(reason: {outcome.reason or 'unknown'})"
+                ),
+            )
             continue
 
         if destination != target:
             collision = True
 
         if collision:
-            _record_move(outcomes, path, destination, check_dir, "collision")
+            outcome = _record_move(outcomes, path, destination, check_dir, "collision")
+            api.log(
+                "info",
+                (
+                    "Moved to _check: "
+                    f"{_rel(root, outcome.source)} -> {_rel(root, outcome.destination)} "
+                    f"(reason: {outcome.reason or 'unknown'})"
+                ),
+            )
         else:
             outcomes.append(FileOutcome("renamed", path, destination))
+            api.log(
+                "info",
+                (
+                    "Renamed: "
+                    f"{_rel(root, path)} -> {_rel(root, destination)}"
+                ),
+            )
 
 
-    summary = _build_report(root, outcomes)
+    summary = _build_summary(outcomes)
     if _GOOGLETRANS_IMPORT_ERROR:
         api.log("warn", "googletrans not available; article repositioning skipped.")
-    api.log("info", summary)
     api.emit_result({"report": summary})
     api.exit(code=0)
 

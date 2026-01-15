@@ -21,11 +21,13 @@ Validates and normalizes PDF filenames in the highlighted directory so they conf
 - Supports three shapes: `PRODUCTION`, `PRODUCTION   EPISODE INFO`, and `PRODUCTION   Episode Title  EPISODE INFO`.
 - Repairs double/incorrect delimiters when a deterministic fix is possible.
 - Repositions leading articles per language detection (English, Spanish, French, etc.).
-- Forces casing: production titles → ALL CAPS, episode titles → Title Case, episode info unchanged.
-- Ensures names stay ≤ 60 chars by truncating episode title first, then production title; trailing punctuation is trimmed before appending `...`.
-- Uses safe renaming with numeric suffixes to avoid overwrites; any collision goes to `_check/`.
+- Forces casing: production titles → ALL CAPS, episode titles → Title Case, episode info normalized.
+- Normalizes episode tokens (case/spacing of `Ep No.`; supports `101A - 101B`; normalizes `version`/`vrsn` to `Vrsn`).
+- Uses ASCII-only filenames (accents removed; smart punctuation normalized).
+- Ensures names stay ≤ 60 chars by truncating episode title first, then production title; trailing `- _ , . ' ` and whitespace are trimmed before appending `. . .`.
+- Uses safe renaming with numeric suffixes to avoid overwrites; any collision moves both the existing and incoming files to `_check/`.
 
 ## Notes
 
 - Files already in compliance are reported but untouched.
-- Broken symlinks, permission errors, or unparsable names are routed to `_check/` with a reason tag.
+- Broken symlinks, permission errors, or unparsable names are routed to `_check/` with a reason tag in the log file.
