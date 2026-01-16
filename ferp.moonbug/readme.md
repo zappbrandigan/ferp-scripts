@@ -28,6 +28,10 @@ naming output files from specific worksheet cells.
   - `I6` for episode title (title-cased).
   - `D15` for episode number/version.
 - Writes PDFs into the target directory, appending a counter if a name exists.
+- Prompts to confirm Excel files are closed and suggests running in test mode.
+- If a naming collision occurs, moves related PDFs and Excel files to `_check` in the same directory.
+- Moves remaining Excel files into `_og` within their original directories after conversion.
+- If a filename includes `None Vrsn`, moves related PDFs and Excel files to `_none_vrsn` in the same directory.
 
 ## Notes
 

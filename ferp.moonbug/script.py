@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import re
 import json
+import shutil
 import platform
 from pathlib import Path
 
 from ferp.fscp.scripts import sdk
 
 
-def _start_excel() -> client.CDispatch:
+def _start_excel():
     """Start Excel app hidden in the background with suppressed alerts."""
-    from win32com import client
+    from win32com import client # type: ignore
     xl_obj = client.Dispatch("Excel.Application")
     xl_obj.Visible = False
     xl_obj.DisplayAlerts = False
@@ -19,7 +20,7 @@ def _start_excel() -> client.CDispatch:
 
 def _get_print_area(worksheet):
     """Find last column and last row containing data to determine print area."""
-    from win32com import client
+    from win32com import client # type: ignore
     column_letters = [chr(x) for x in range(65, 91)]
     col_last_row = {}
 
@@ -97,9 +98,14 @@ def _escape_file_name(file_name):
     return re.sub(r"[<>:\\\"/|?!*]", "", file_name)
 
 
-def _build_destination(directory: Path, base: str, suffix: str) -> Path:
+def _build_destination(
+    directory: Path,
+    base: str,
+    suffix: str,
+    force_suffix: bool = False,
+) -> Path:
     candidate = directory / f"{base}{suffix}"
-    if not candidate.exists():
+    if not candidate.exists() and not force_suffix:
         return candidate
 
     counter = 1
@@ -115,8 +121,38 @@ def _export_pdf(worksheet, out_file):
     worksheet.ExportAsFixedFormat(0, str(out_file))
 
 
+def _ensure_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _move_to_dir(source: Path, destination_dir: Path) -> Path:
+    if source.parent == destination_dir:
+        return source
+    _ensure_dir(destination_dir)
+    destination = _build_destination(destination_dir, source.stem, source.suffix)
+    shutil.move(str(source), destination)
+    return destination
+
+
+def _is_in_named_dir(path: Path, dir_name: str) -> bool:
+    return any(parent.name == dir_name for parent in path.parents)
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    confirm = api.confirm(
+        "Before continuing, close all Excel windows/files. "
+        "For best results, run a test first (enable Test mode). Continue?",
+        default=False,
+    )
+    if not confirm:
+        api.emit_result(
+            {
+                "message": "Script cancelled",
+            }
+        )
+        return
+
     response = api.request_input(
         "Options for Moonbug Excel to PDF script",
         id="moonbug_excel_to_pdf_options",
@@ -178,26 +214,96 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         api.log("info", f"Moonbug Excel to PDF | Files found={total_files}")
 
     xl_window = _start_excel()
+    base_name_map_by_dir: dict[Path, dict[str, Path | None]] = {}
+    moved_to_check: set[Path] = set()
+    moved_to_none: set[Path] = set()
 
     try:
         for index, file in enumerate(xl_files, start=1):
             api.progress(current=index, total=total_files, unit="files")
             workbook = None
+            destination = None
+            base_name = None
+            base_pdf = None
+            collision = False
+            preexisting_base_pdf = False
+            is_none_vrsn = False
+            parent_dir = file.parent
+            check_dir = parent_dir / "_check"
+            none_dir = parent_dir / "_none_vrsn"
+            base_name_map = base_name_map_by_dir.setdefault(parent_dir, {})
             try:
                 workbook = xl_window.Workbooks.Open(str(file), UpdateLinks=0)
                 worksheet = workbook.Worksheets(1)
                 print_area = _get_print_area(worksheet)
                 _page_setup(worksheet, print_area, autofit_column)
-                file_name = _get_outfile_from_cells(worksheet)
-                destination = _build_destination(root_path, file_name, ".pdf")
+                base_name = _get_outfile_from_cells(worksheet)
+                is_none_vrsn = bool(base_name and "None Vrsn" in base_name)
+                base_pdf = parent_dir / f"{base_name}.pdf"
+                preexisting_base_pdf = base_pdf.exists()
+                collision = base_name in base_name_map or preexisting_base_pdf
+                destination = _build_destination(
+                    parent_dir, base_name, ".pdf", force_suffix=collision
+                )
                 _export_pdf(worksheet, destination)
+                if base_name not in base_name_map:
+                    base_name_map[base_name] = None if preexisting_base_pdf else file
             except Exception as e:
                 api.log("warn", f"Failed to process '{file}': {e}")
             finally:
                 if workbook is not None:
                     workbook.Close(SaveChanges=False)
+            if base_name and destination:
+                if is_none_vrsn:
+                    if destination.exists():
+                        _move_to_dir(destination, none_dir)
+                    if file.exists() and file not in moved_to_none:
+                        _move_to_dir(file, none_dir)
+                        moved_to_none.add(file)
+                    if base_pdf is not None and base_pdf.exists():
+                        _move_to_dir(base_pdf, none_dir)
+                    original_excel = base_name_map.get(base_name)
+                    if (
+                        original_excel is not None
+                        and original_excel.exists()
+                        and original_excel not in moved_to_none
+                    ):
+                        _move_to_dir(original_excel, none_dir)
+                        moved_to_none.add(original_excel)
+                elif collision:
+                    if destination.exists():
+                        _move_to_dir(destination, check_dir)
+                    if file.exists() and file not in moved_to_check:
+                        _move_to_dir(file, check_dir)
+                        moved_to_check.add(file)
+                    if base_pdf is not None and base_pdf.exists():
+                        _move_to_dir(base_pdf, check_dir)
+                    original_excel = base_name_map.get(base_name)
+                    if (
+                        original_excel is not None
+                        and original_excel.exists()
+                        and original_excel not in moved_to_check
+                    ):
+                        _move_to_dir(original_excel, check_dir)
+                        moved_to_check.add(original_excel)
     finally:
         xl_window.Application.Quit()
+
+    for file in xl_files:
+        if file in moved_to_check:
+            continue
+        if file in moved_to_none:
+            continue
+        if (
+            _is_in_named_dir(file, "_check")
+            or _is_in_named_dir(file, "_og")
+            or _is_in_named_dir(file, "_none_vrsn")
+        ):
+            continue
+        if not file.exists():
+            continue
+        og_dir = file.parent / "_og"
+        _move_to_dir(file, og_dir)
 
     api.emit_result(
         {
