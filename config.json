@@ -13,7 +13,7 @@
         "{target}"
       ],
       "requires_input": false,
-      "target": "highlighted_file"
+      "target": "highlighted_directory"
     },
     {
       "id": "ferp.unzip_file",
@@ -28,7 +28,10 @@
         "{target}"
       ],
       "requires_input": false,
-      "target": "highlighted_file"
+      "target": "highlighted_file",
+      "file_extensions": [
+        ".zip"
+      ]
     },
     {
       "id": "ferp.extract_pdf_metadata",
@@ -41,7 +44,7 @@
       },
       "args": [],
       "requires_input": true,
-      "target": "highlighted_file"
+      "target": "highlighted_directory"
     },
     {
       "id": "ferp.backup_dir",
@@ -56,7 +59,7 @@
         "{target}"
       ],
       "requires_input": false,
-      "target": "highlighted_file"
+      "target": "highlighted_directory"
     },
     {
       "id": "ferp.restore_backup",
@@ -71,7 +74,10 @@
         "{target}"
       ],
       "requires_input": false,
-      "target": "highlighted_file"
+      "target": "highlighted_file",
+      "file_extensions": [
+        ".backup.zip"
+      ]
     },
     {
       "id": "ferp.extractor",
@@ -86,7 +92,10 @@
         "{target}"
       ],
       "requires_input": false,
-      "target": "highlighted_file"
+      "target": "highlighted_file",
+      "file_extensions": [
+        ".zip"
+      ]
     },
     {
       "id": "ferp.flatten_dir",
@@ -101,7 +110,7 @@
         "{target}"
       ],
       "requires_input": false,
-      "target": "highlighted_file"
+      "target": "highlighted_directory"
     },
     {
       "id": "ferp.query_pdf",
@@ -114,7 +123,7 @@
       },
       "args": [],
       "requires_input": true,
-      "target": "highlighted_file"
+      "target": "highlighted_directory"
     },
     {
       "id": "ferp.merge_tabular",
@@ -127,7 +136,7 @@
       },
       "args": [],
       "requires_input": false,
-      "target": "highlighted_file"
+      "target": "current_directory"
     },
     {
       "id": "ferp.summarize_tree",
@@ -140,7 +149,7 @@
       },
       "args": [],
       "requires_input": false,
-      "target": "highlighted_file"
+      "target": "highlighted_directory"
     },
     {
       "id": "ferp.normalize_pdf_names",
@@ -153,7 +162,7 @@
       },
       "args": [],
       "requires_input": false,
-      "target": "highlighted_file"
+      "target": "highlighted_directory"
     },
     {
       "id": "ferp.hello_world",
@@ -181,7 +190,7 @@
       },
       "args": [],
       "requires_input": false,
-      "target": "highlighted_file"
+      "target": "highlighted_directory"
     },
     {
       "id": "ferp.moonbug",
@@ -194,7 +203,7 @@
       },
       "args": [],
       "requires_input": true,
-      "target": "highlighted_file"
+      "target": "highlighted_directory"
     },
     {
       "id": "ferp.rename_uvs",
@@ -207,7 +216,7 @@
       },
       "args": [],
       "requires_input": true,
-      "target": "highlighted_file"
+      "target": "highlighted_directory"
     }
   ]
 }
