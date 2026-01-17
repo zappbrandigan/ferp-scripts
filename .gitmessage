@@ -1,0 +1,49 @@
+# <type>(<scope>): <short summary>
+#
+# Examples:
+#   feat(rename): support regex-based episode normalization
+#   fix(unzip): handle nested archives safely
+#   perf(fs): reduce directory walk overhead for large trees
+#
+# Types:
+#   feat      | new script behavior or capability
+#   fix       | bug fix in script logic or output
+#   refactor  | internal cleanup without behavior change
+#   perf      | performance improvement in script execution
+#   docs      | script docs, usage examples, or comments
+#   chore     | maintenance, formatting, or housekeeping
+#   test      | script tests, fixtures, or harness updates
+#   build     | packaging or distribution wiring
+#   ci        | automation pipelines or checks
+#   deps      | dependency updates
+#
+# Suggested scopes:
+#   flatten | folder flattening utilities
+#   rename  | rename/normalize scripts and helpers
+#   unzip   | archive extraction routines
+#   zip     | archive creation routines
+#   pdf     | PDF-related scripts
+#   excel   | Excel/CSV processing scripts
+#   fs      | filesystem traversal utilities
+#   common  | shared helpers used across scripts
+#   fscp    | script-side FSCP protocol behavior
+#
+# Body (script behavior):
+# - Script(s) affected:
+# - Inputs changed?
+# - Outputs changed?
+# - Side effects (filesystem writes/deletes/moves)?
+#
+# FSCP Contract (if applicable):
+# - Messages emitted/changed (log/progress/request_input/result/exit):
+# - Stdout/stderr behavior changes:
+# - Envelope/schema changes:
+#
+# Safety Checklist:
+# - Destructive operation? (yes/no; describe safeguards)
+# - Backwards compatible with host? (yes/no; required host changes)
+#
+# References:
+# - Issue/Ticket:
+# - Sample files / repro steps:
+# - Related commits:
