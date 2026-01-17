@@ -12,6 +12,7 @@
       "args": [
         "{target}"
       ],
+      "dependencies": [],
       "requires_input": false,
       "target": "highlighted_directory"
     },
@@ -27,6 +28,7 @@
       "args": [
         "{target}"
       ],
+      "dependencies": [],
       "requires_input": false,
       "target": "highlighted_file",
       "file_extensions": [
@@ -43,6 +45,9 @@
         "other": "scripts/ferp.extract_pdf_metadata/script.py"
       },
       "args": [],
+      "dependencies": [
+        "PyPDF2>=3.0"
+      ],
       "requires_input": true,
       "target": "highlighted_directory"
     },
@@ -58,6 +63,7 @@
       "args": [
         "{target}"
       ],
+      "dependencies": [],
       "requires_input": false,
       "target": "highlighted_directory"
     },
@@ -91,6 +97,9 @@
       "args": [
         "{target}"
       ],
+      "dependencies": [
+        "extract-msg>=0.55.0"
+      ],
       "requires_input": false,
       "target": "highlighted_file",
       "file_extensions": [
@@ -99,7 +108,7 @@
     },
     {
       "id": "ferp.flatten_dir",
-      "name": "Normalize: Directory",
+      "name": "Normalize: Flatten Directory",
       "version": "1.0.0",
       "type": "python",
       "script": {
@@ -122,6 +131,9 @@
         "other": "scripts/ferp.query_pdf/script.py"
       },
       "args": [],
+      "dependencies": [
+        "PyPDF2>=3.0"
+      ],
       "requires_input": true,
       "target": "highlighted_directory"
     },
@@ -135,6 +147,9 @@
         "other": "scripts/ferp.merge_tabular/script.py"
       },
       "args": [],
+      "dependencies": [
+        "openpyxl>=3.1"
+      ],
       "requires_input": false,
       "target": "current_directory"
     },
@@ -161,6 +176,10 @@
         "other": "scripts/ferp.normalize_pdf_names/script.py"
       },
       "args": [],
+      "dependencies": [
+        "googletrans==4.0.2",
+        "Unidecode>=1.3.8"
+      ],
       "requires_input": false,
       "target": "highlighted_directory"
     },
@@ -176,6 +195,7 @@
       "args": [
         "{target}"
       ],
+      "dependencies": [],
       "requires_input": true,
       "target": "current_directory"
     },
@@ -189,6 +209,7 @@
         "other": "scripts/ferp.rename_fox_emails/script.py"
       },
       "args": [],
+      "dependencies": [],
       "requires_input": false,
       "target": "highlighted_directory"
     },
@@ -202,6 +223,9 @@
         "other": "scripts/ferp.moonbug/script.py"
       },
       "args": [],
+      "dependencies": [
+        "pywin32>=306; platform_system == \"Windows\""
+      ],
       "requires_input": true,
       "target": "highlighted_directory"
     },
@@ -215,6 +239,9 @@
         "other": "scripts/ferp.rename_uvs/script.py"
       },
       "args": [],
+      "dependencies": [
+        "pdfplumber>=0.11.8"
+      ],
       "requires_input": true,
       "target": "highlighted_directory"
     }
