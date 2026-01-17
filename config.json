@@ -99,7 +99,7 @@
     },
     {
       "id": "ferp.flatten_dir",
-      "name": "Normalize: Flatten Directory",
+      "name": "Normalize: Directory",
       "version": "1.0.0",
       "type": "python",
       "script": {
