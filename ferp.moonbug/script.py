@@ -64,10 +64,12 @@ def _get_outfile_from_cells(worksheet):
 
     pd_cell_row, pd_cell_col = int(pd_cell[1:]), int(column_numbers[pd_cell[0]])
     pd_title = _cell_text(worksheet.Cells(pd_cell_row, pd_cell_col).Value).upper()
+    pd_title = _collapse_spaces(pd_title)
 
     ep_cell_row, ep_cell_col = int(ep_cell[1:]), int(column_numbers[ep_cell[0]])
     ep_title = _cell_text(worksheet.Cells(ep_cell_row, ep_cell_col).Value)
     ep_title = ep_title.replace("\u2019", "'")
+    ep_title = _collapse_spaces(ep_title)
     ep_title = _titlecase(ep_title) if ep_title else None
 
     no_cell_row, no_cell_col = int(no_cell[1:]), int(column_numbers[no_cell[0]])
@@ -91,6 +93,11 @@ def _cell_text(value) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _collapse_spaces(text: str) -> str:
+    """Reduce internal whitespace to single spaces."""
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _escape_file_name(file_name):
