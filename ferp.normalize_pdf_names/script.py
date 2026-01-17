@@ -28,7 +28,8 @@ EPISODE_DELIM = "  "
 ELLIPSIS = ". . ."
 ELLIPSIS_LEN = len(ELLIPSIS)
 SPACE_RUN_RE = re.compile(r"( {2,})")
-PROGRESS_EVERY = 50
+PROGRESS_EVERY_MAX = 50
+PROGRESS_TARGET_UPDATES = 30
 T = TypeVar("T")
 _ASCII_PUNCT_TRANSLATION = str.maketrans(
     {
@@ -520,6 +521,12 @@ def _rel(root: Path, path: Path | None) -> str:
         return str(path)
 
 
+def _progress_every(total_entries: int) -> int:
+    if total_entries <= 1:
+        return 1
+    return max(1, min(PROGRESS_EVERY_MAX, total_entries // PROGRESS_TARGET_UPDATES))
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     root = ctx.target_path
@@ -535,11 +542,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         raise ValueError("Permission denied while listing directory.")
 
     total_entries = len(entries) or 1
+    progress_every = _progress_every(total_entries)
 
     for index, entry in enumerate(entries, start=1):
         path = Path(entry.path)
         
-        if total_entries > 1 and (index == total_entries or index % PROGRESS_EVERY == 0):
+        if total_entries > 1 and (index == total_entries or index % progress_every == 0):
             api.progress(current=index, total=total_entries, unit="files")
 
         if entry.is_symlink() and not path.exists():
