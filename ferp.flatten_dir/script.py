@@ -9,7 +9,7 @@ from ferp.fscp.scripts import sdk
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     confirm = api.confirm(
         f"This will flatten all subdirectories in {ctx.target_path.stem}. Continue?",
-        default=False
+        default=False,
     )
     if not confirm:
         api.emit_result(

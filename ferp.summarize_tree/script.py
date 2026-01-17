@@ -21,7 +21,7 @@ def _walk(root: Path) -> Iterator[tuple[Path, str, Counter[str]]]:
                 subdirs = []
                 for entry in entries:
                     name = entry.name
-                    if name.startswith('.'):
+                    if name.startswith("."):
                         continue
                     try:
                         if entry.is_dir(follow_symlinks=False):
@@ -36,7 +36,7 @@ def _walk(root: Path) -> Iterator[tuple[Path, str, Counter[str]]]:
         except (OSError, PermissionError):
             continue
 
-        rel = str(directory.relative_to(root)) if directory != root else ''
+        rel = str(directory.relative_to(root)) if directory != root else ""
         yield directory, rel, counter
 
         for subdir in sorted(subdirs, reverse=True):
@@ -114,20 +114,23 @@ def _truncate_lines(lines: list[str]) -> list[str]:
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     root = ctx.target_path
     if not root.exists():
-        api.emit_result({
-            "root": str(root),
-            "summary": "Target path does not exist.\nNo directory summary generated.",
-        })
+        api.emit_result(
+            {
+                "root": str(root),
+                "summary": "Target path does not exist.\nNo directory summary generated.",
+            }
+        )
         api.exit(code=0)
         return
     if not root.is_dir():
-        api.emit_result({
-            "root": str(root),
-            "summary": (
-                f"Target is a file: {root}\n"
-                "Select a directory to summarize."
-            ),
-        })
+        api.emit_result(
+            {
+                "root": str(root),
+                "summary": (
+                    f"Target is a file: {root}\nSelect a directory to summarize."
+                ),
+            }
+        )
         api.exit(code=0)
         return
 
@@ -140,10 +143,14 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             "extensions": dict(sorted(file_counter.items())),
         }
         summary.append(entry)
-        ext_details = ", ".join(f"{ext or '<no ext>'}: {count}" for ext, count in entry["extensions"].items())
+        ext_details = ", ".join(
+            f"{ext or '<no ext>'}: {count}"
+            for ext, count in entry["extensions"].items()
+        )
         api.log(
             "info",
-            f"{rel_path or '.'}: {total} file(s)" + (f" ({ext_details})" if ext_details else ""),
+            f"{rel_path or '.'}: {total} file(s)"
+            + (f" ({ext_details})" if ext_details else ""),
         )
 
     total_files = sum(entry["total_files"] for entry in summary)
@@ -158,11 +165,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     lines = header + _build_summary_table(summary).splitlines()
     lines = _truncate_lines(lines)
 
-    api.emit_result({
-        "root": str(root),
-        # "directories": summary,
-        "summary": "\n".join(lines),
-    })
+    api.emit_result(
+        {
+            "root": str(root),
+            # "directories": summary,
+            "summary": "\n".join(lines),
+        }
+    )
     api.exit(code=0)
 
 

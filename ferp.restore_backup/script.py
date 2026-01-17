@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
 import zipfile
+from pathlib import Path
 
 from ferp.fscp.scripts import sdk
-
 
 BACKUP_SUFFIX = ".backup.zip"
 

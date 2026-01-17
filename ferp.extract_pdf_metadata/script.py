@@ -29,7 +29,9 @@ def _normalize_metadata(reader: PdfReader) -> dict[str, str]:
 def _write_csv(csv_path: Path, rows: list[dict[str, str]]) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["file", "relative_path", "tag", "value"])
+        writer = csv.DictWriter(
+            handle, fieldnames=["file", "relative_path", "tag", "value"]
+        )
         writer.writeheader()
         writer.writerows(rows)
 
@@ -39,7 +41,9 @@ def _format_results(results: list[dict[str, object]]) -> str:
     lines: list[str] = []
     for index, entry in enumerate(results):
         if index >= MAX_DISPLAY:
-            lines.append(f"(truncated to {MAX_DISPLAY} results; export CSV for full data)")
+            lines.append(
+                f"(truncated to {MAX_DISPLAY} results; export CSV for full data)"
+            )
             break
         relative_path = str(entry.get("relative_path", ""))
         metadata = entry.get("metadata")

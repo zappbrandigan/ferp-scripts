@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+
 import pdfplumber
 
 from ferp.fscp.scripts import sdk
@@ -12,9 +13,11 @@ _CHECK_DIRNAME = "_check"
 
 _INVALID_NAME_CHARS = re.compile(r'[<>:"/\\|?*]')
 
+
 def _sanitize_filename(name: str) -> str:
     cleaned = _INVALID_NAME_CHARS.sub("_", name).strip()
     return cleaned or "untitled"
+
 
 def _extract_first_page_text(path: Path) -> str | None:
     with pdfplumber.open(path) as reader:
@@ -23,10 +26,12 @@ def _extract_first_page_text(path: Path) -> str | None:
         except IndexError:
             return None
 
+
 def _normalize_year(year: str) -> str:
     if len(year) == 2:
         return f"20{year}"
     return year
+
 
 def _extract_episode_value(text: str) -> str:
     episode_match = re.search(r"Episode Number:\s*([^\s]+)", text)
@@ -90,15 +95,19 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         raise RuntimeError(f"Target directory '{target_dir}' is not accessible.")
 
     pdf_files = sorted(
-        [path for path in target_dir.iterdir() if path.is_file() and path.suffix.lower() == _SUFFIX],
+        [
+            path
+            for path in target_dir.iterdir()
+            if path.is_file() and path.suffix.lower() == _SUFFIX
+        ],
         key=lambda item: item.name.lower(),
     )
 
     if not pdf_files:
-        api.log("info", F"No {_SUFFIX} files found to rename.")
+        api.log("info", f"No {_SUFFIX} files found to rename.")
         api.emit_result({"renamed": 0})
         return
-    
+
     renamed = 0
     skipped = 0
     needs_ocr = 0
@@ -109,9 +118,14 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             try:
                 _move_to_dir(pdf, target_dir / _NEEDS_OCR_DIRNAME)
                 needs_ocr += 1
-                api.log("info", f"Moved '{pdf.name}' to '{_NEEDS_OCR_DIRNAME}' (no text).")
+                api.log(
+                    "info", f"Moved '{pdf.name}' to '{_NEEDS_OCR_DIRNAME}' (no text)."
+                )
             except OSError as exc:
-                api.log("error", f"Failed to move '{pdf.name}' to '{_NEEDS_OCR_DIRNAME}': {exc}")
+                api.log(
+                    "error",
+                    f"Failed to move '{pdf.name}' to '{_NEEDS_OCR_DIRNAME}': {exc}",
+                )
             api.progress(current=index, total=len(pdf_files), unit="files")
             continue
 
@@ -159,7 +173,9 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         if base_destination.exists():
             check_dir = target_dir / _CHECK_DIRNAME
             try:
-                existing_destination = _move_to_dir(base_destination, check_dir, new_base)
+                existing_destination = _move_to_dir(
+                    base_destination, check_dir, new_base
+                )
                 incoming_destination = _move_to_dir(pdf, check_dir, new_base)
                 check += 1
                 api.log(

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from ferp.fscp.scripts import sdk
 import time
+
+from ferp.fscp.scripts import sdk
 
 
 @sdk.script

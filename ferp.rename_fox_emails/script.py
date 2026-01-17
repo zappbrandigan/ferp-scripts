@@ -36,7 +36,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         raise RuntimeError(f"Target directory '{target_dir}' is not accessible.")
 
     pdf_files = sorted(
-        [path for path in target_dir.iterdir() if path.is_file() and path.suffix.lower() == _SUFFIX],
+        [
+            path
+            for path in target_dir.iterdir()
+            if path.is_file() and path.suffix.lower() == _SUFFIX
+        ],
         key=lambda item: item.name.lower(),
     )
 

@@ -1,6 +1,6 @@
 import shutil
-from pathlib import Path, PurePosixPath
 import zipfile
+from pathlib import Path, PurePosixPath
 
 from ferp.fscp.scripts import sdk
 
@@ -8,7 +8,9 @@ from ferp.fscp.scripts import sdk
 def _common_root(members: list[zipfile.ZipInfo]) -> str | None:
     root: str | None = None
     for info in members:
-        parts = [part for part in PurePosixPath(info.filename).parts if part not in {"", "."}]
+        parts = [
+            part for part in PurePosixPath(info.filename).parts if part not in {"", "."}
+        ]
         if not parts:
             continue
         head = parts[0]

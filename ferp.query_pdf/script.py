@@ -68,7 +68,10 @@ def _process_pdf(
         try:
             text = page.extract_text() or ""
         except Exception as exc:  # noqa: BLE001
-            api.log("warning", f"Text extraction failed for '{pdf_path.name}' (page {page_number}): {exc}")
+            api.log(
+                "warning",
+                f"Text extraction failed for '{pdf_path.name}' (page {page_number}): {exc}",
+            )
             continue
 
         if not text:
@@ -101,7 +104,13 @@ def _extract_context(text: str, start: int, end: int, context_chars: int) -> str
 
 
 def _write_csv(csv_path: Path, rows: list[dict[str, object]]) -> None:
-    fieldnames = ["file_name", "relative_path", "page_number", "match_text", "context_excerpt"]
+    fieldnames = [
+        "file_name",
+        "relative_path",
+        "page_number",
+        "match_text",
+        "context_excerpt",
+    ]
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
@@ -127,12 +136,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             "Enter search query",
             id="query_pdf_options",
             fields=[
-                {
-                    "id": "regex", 
-                    "type": "bool", 
-                    "label": "Use regex", 
-                    "default": regex
-                },
+                {"id": "regex", "type": "bool", "label": "Use regex", "default": regex},
                 {
                     "id": "case_sensitive",
                     "type": "bool",

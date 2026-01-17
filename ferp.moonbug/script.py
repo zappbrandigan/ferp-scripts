@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import re
 import json
-import shutil
 import platform
+import re
+import shutil
 from pathlib import Path
 
 from ferp.fscp.scripts import sdk
@@ -11,7 +11,8 @@ from ferp.fscp.scripts import sdk
 
 def _start_excel():
     """Start Excel app hidden in the background with suppressed alerts."""
-    from win32com import client # type: ignore
+    from win32com import client  # type: ignore
+
     xl_obj = client.Dispatch("Excel.Application")
     xl_obj.Visible = False
     xl_obj.DisplayAlerts = False
@@ -20,7 +21,8 @@ def _start_excel():
 
 def _get_print_area(worksheet):
     """Find last column and last row containing data to determine print area."""
-    from win32com import client # type: ignore
+    from win32com import client  # type: ignore
+
     column_letters = [chr(x) for x in range(65, 91)]
     col_last_row = {}
 
@@ -76,9 +78,7 @@ def _get_outfile_from_cells(worksheet):
     ep_number = _cell_text(worksheet.Cells(no_cell_row, no_cell_col).Value)
     ep_number = f"{ep_number} Vrsn" if ep_number else "None Vrsn"
 
-    return _escape_file_name(
-        f"{pd_title}   {ep_title}  {ep_number}"
-    )
+    return _escape_file_name(f"{pd_title}   {ep_title}  {ep_number}")
 
 
 def _titlecase(text):
@@ -164,20 +164,15 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         "Options for Moonbug Excel to PDF script",
         id="moonbug_excel_to_pdf_options",
         fields=[
+            {"id": "test", "type": "bool", "label": "Test mode", "default": False},
             {
-                "id": "test", 
-                "type": "bool", 
-                "label": "Test mode", 
-                "default": False
+                "id": "autofitcolumn",
+                "type": "bool",
+                "label": "Autofit columns",
+                "default": True,
             },
-            {
-                "id": "autofitcolumn", 
-                "type": "bool", 
-                "label": "Autofit columns", 
-                "default": True
-            }
         ],
-        show_text_input=False 
+        show_text_input=False,
     )
     if response is None:
         api.exit(code=1)
@@ -186,10 +181,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         payload = json.loads(response)
     except json.JSONDecodeError:
         payload = {"value": response}
-    
+
     is_test = bool(payload.get("test", False))
     autofit_column = bool(payload.get("autofitcolumn", True))
-    
+
     root_path = ctx.target_path
     if not root_path.exists() or not root_path.is_dir():
         raise ValueError(f"Target must be a directory. Received: {root_path}")

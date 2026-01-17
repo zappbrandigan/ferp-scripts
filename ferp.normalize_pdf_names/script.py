@@ -19,8 +19,8 @@ else:
 
 from unidecode import unidecode
 
-from ferp.resources.articles import language_articles
 from ferp.fscp.scripts import sdk
+from ferp.resources.articles import language_articles
 
 MAX_FILENAME_LENGTH = 60
 PRODUCTION_DELIM = "   "
@@ -92,7 +92,7 @@ def _parse_name(raw: str) -> tuple[ParsedName | None, str | None]:
     segments: list[str] = []
     last = 0
     for match in matches:
-        segments.append(name[last:match.start()])
+        segments.append(name[last : match.start()])
         last = match.end()
     segments.append(name[last:])
     segments = [segment.strip() for segment in segments]
@@ -106,7 +106,9 @@ def _parse_name(raw: str) -> tuple[ParsedName | None, str | None]:
     if delim_count == 1 and len(segments) == 2:
         return ParsedName(segments[0], None, segments[1], "show_no_episode"), None
     if delim_count == 2 and len(segments) == 3:
-        return ParsedName(segments[0], segments[1], segments[2], "show_with_episode"), None
+        return ParsedName(
+            segments[0], segments[1], segments[2], "show_with_episode"
+        ), None
     return None, "ambiguous_delimiters"
 
 
@@ -185,7 +187,9 @@ def _normalize_episode_token(value: str) -> str:
     )
     if compound:
         left_num, left_suffix, right_num, right_suffix = compound.groups()
-        remainder = f"{left_num}{left_suffix.upper()} - {right_num}{right_suffix.upper()}"
+        remainder = (
+            f"{left_num}{left_suffix.upper()} - {right_num}{right_suffix.upper()}"
+        )
     else:
         remainder = re.sub(
             r"^(\d+)([a-zA-Z])$",
@@ -254,7 +258,9 @@ def _enforce_length(parts: ParsedName) -> str | None:
         parts.production = shortened
         if total_length() <= MAX_FILENAME_LENGTH:
             return None
-        max_info_len = MAX_FILENAME_LENGTH - (len(PRODUCTION_DELIM) + len(parts.production))
+        max_info_len = MAX_FILENAME_LENGTH - (
+            len(PRODUCTION_DELIM) + len(parts.production)
+        )
         shortened_info = _shorten(info, max_info_len, min_visible=1)
         if not shortened_info:
             return "length_limit"
@@ -281,11 +287,17 @@ def _enforce_length(parts: ParsedName) -> str | None:
         return None
 
     available_for_production = MAX_FILENAME_LENGTH - (
-        len(PRODUCTION_DELIM) + len(parts.episode_title or "") + len(EPISODE_DELIM) + len(info)
+        len(PRODUCTION_DELIM)
+        + len(parts.episode_title or "")
+        + len(EPISODE_DELIM)
+        + len(info)
     )
     if available_for_production < (1 + ELLIPSIS_LEN):
         max_info_len = MAX_FILENAME_LENGTH - (
-            len(PRODUCTION_DELIM) + len(parts.episode_title or "") + len(EPISODE_DELIM) + 1
+            len(PRODUCTION_DELIM)
+            + len(parts.episode_title or "")
+            + len(EPISODE_DELIM)
+            + 1
         )
         if max_info_len < (1 + ELLIPSIS_LEN):
             return "length_limit"
@@ -295,7 +307,10 @@ def _enforce_length(parts: ParsedName) -> str | None:
         info = shortened_info
         parts.episode_info = shortened_info
         available_for_production = MAX_FILENAME_LENGTH - (
-            len(PRODUCTION_DELIM) + len(parts.episode_title or "") + len(EPISODE_DELIM) + len(info)
+            len(PRODUCTION_DELIM)
+            + len(parts.episode_title or "")
+            + len(EPISODE_DELIM)
+            + len(info)
         )
         if available_for_production < (1 + ELLIPSIS_LEN):
             return "length_limit"
@@ -306,7 +321,10 @@ def _enforce_length(parts: ParsedName) -> str | None:
     if total_length() <= MAX_FILENAME_LENGTH:
         return None
     max_info_len = MAX_FILENAME_LENGTH - (
-        len(parts.production) + len(PRODUCTION_DELIM) + len(parts.episode_title or "") + len(EPISODE_DELIM)
+        len(parts.production)
+        + len(PRODUCTION_DELIM)
+        + len(parts.episode_title or "")
+        + len(EPISODE_DELIM)
     )
     if max_info_len < (1 + ELLIPSIS_LEN):
         return "length_limit"
@@ -337,7 +355,11 @@ def _trim_trailing_special(text: str, min_visible: int) -> str:
 
 def _trim_trailing_suffix(text: str, min_visible: int) -> str:
     chars = list(text)
-    while len(chars) > min_visible and chars and chars[-1] in {"-", "_", ",", ".", "'", " "}:
+    while (
+        len(chars) > min_visible
+        and chars
+        and chars[-1] in {"-", "_", ",", ".", "'", " "}
+    ):
         chars.pop()
     return "".join(chars)
 
@@ -407,7 +429,7 @@ def _match_article_prefix(token: str, articles: list[str]) -> tuple[str, str] | 
             continue
         if lowered.startswith(article.lower()):
             prefix = token[: len(article)]
-            remainder = token[len(article):]
+            remainder = token[len(article) :]
             return prefix, remainder
     return None
 
@@ -546,8 +568,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     for index, entry in enumerate(entries, start=1):
         path = Path(entry.path)
-        
-        if total_entries > 1 and (index == total_entries or index % progress_every == 0):
+
+        if total_entries > 1 and (
+            index == total_entries or index % progress_every == 0
+        ):
             api.progress(current=index, total=total_entries, unit="files")
 
         if entry.is_symlink() and not path.exists():
@@ -581,7 +605,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         normalized, normalize_reason = _normalize_name(parsed)
         if not normalized:
             outcome = _record_move(
-                outcomes, path, path, check_dir, normalize_reason or "unrepairable_structure"
+                outcomes,
+                path,
+                path,
+                check_dir,
+                normalize_reason or "unrepairable_structure",
             )
             api.log(
                 "info",
@@ -652,7 +680,9 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             )
             continue
         except OSError as exc:
-            outcome = _record_move(outcomes, path, path, check_dir, f"other_error: {exc}")
+            outcome = _record_move(
+                outcomes, path, path, check_dir, f"other_error: {exc}"
+            )
             api.log(
                 "info",
                 (
@@ -680,12 +710,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             outcomes.append(FileOutcome("renamed", path, destination))
             api.log(
                 "info",
-                (
-                    "Renamed: "
-                    f"{_rel(root, path)} -> {_rel(root, destination)}"
-                ),
+                (f"Renamed: {_rel(root, path)} -> {_rel(root, destination)}"),
             )
-
 
     summary = _build_summary(outcomes)
     if _GOOGLETRANS_IMPORT_ERROR:
