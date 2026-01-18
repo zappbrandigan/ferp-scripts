@@ -244,6 +244,22 @@
       ],
       "requires_input": true,
       "target": "highlighted_directory"
+    },
+    {
+      "id": "ferp.excel_diff",
+      "name": "Compare: Excel Diff",
+      "version": "1.0.0",
+      "type": "python",
+      "script": {
+        "windows": "scripts/ferp.excel_diff/script.py",
+        "other": "scripts/ferp.excel_diff/script.py"
+      },
+      "args": [],
+      "dependencies": [
+        "openpyxl>=3.1"
+      ],
+      "requires_input": true,
+      "target": "current_directory"
     }
   ]
 }
