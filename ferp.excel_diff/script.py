@@ -156,6 +156,11 @@ def _sample_cells(path: Path, max_cells: int = 5) -> list[tuple[str, str, object
     return samples
 
 
+def _ensure_xlsx(path: Path, label: str) -> None:
+    if path.suffix.lower() != ".xlsx":
+        raise ValueError(f"{label} must be a .xlsx file: {path}")
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     target_dir = ctx.target_path
@@ -190,6 +195,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         raise FileNotFoundError(a_path)
     if not b_path.exists():
         raise FileNotFoundError(b_path)
+    _ensure_xlsx(a_path, "file_a")
+    _ensure_xlsx(b_path, "file_b")
 
     sheets = [s.strip() for s in sheets_raw.split(",") if s.strip()] or None
 
@@ -211,7 +218,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     output_dir = a_path.parent
     if a_path.parent != b_path.parent:
         api.log(
-            "warning",
+            "warn",
             (
                 "Input files are in different directories; writing CSV next to "
                 f"the first file: {a_path.parent}"

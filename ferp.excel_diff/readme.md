@@ -1,7 +1,6 @@
 # Compare Excel Diff
 
-Compares two Excel files and reports cell-level differences, with optional
-CSV output.
+Compares two Excel files and reports cell-level differences, with CSV output.
 
 ---
 

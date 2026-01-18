@@ -35,7 +35,7 @@ def _process_pdf(
 ) -> list[dict[str, object]]:
     reader = PdfReader(str(pdf_path))
     if reader.is_encrypted:
-        api.log("warning", f"Skipping encrypted PDF: {pdf_path.name}")
+        api.log("warn", f"Skipping encrypted PDF: {pdf_path.name}")
         return []
 
     pdf_matches: list[dict[str, object]] = []
@@ -46,7 +46,7 @@ def _process_pdf(
             text = page.extract_text() or ""
         except Exception as exc:  # noqa: BLE001
             api.log(
-                "warning",
+                "warn",
                 f"Text extraction failed for '{pdf_path.name}' (page {page_number}): {exc}",
             )
             continue
@@ -170,7 +170,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 api,
             )
         except Exception as exc:  # noqa: BLE001
-            api.log("warning", f"Failed to process '{pdf_path}': {exc}")
+            api.log("warn", f"Failed to process '{pdf_path}': {exc}")
             continue
 
         if pdf_matches:

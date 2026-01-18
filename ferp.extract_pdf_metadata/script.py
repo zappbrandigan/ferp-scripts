@@ -37,7 +37,7 @@ def _write_csv(csv_path: Path, rows: list[dict[str, str]]) -> None:
 
 
 def _format_results(results: list[dict[str, object]]) -> str:
-    MAX_DISPLAY = 100
+    MAX_DISPLAY = 25
     lines: list[str] = []
     for index, entry in enumerate(results):
         if index >= MAX_DISPLAY:
@@ -107,11 +107,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         try:
             reader = PdfReader(str(pdf_path))
         except Exception as exc:  # noqa: BLE001
-            api.log("warning", f"Failed to read '{pdf_path}': {exc}")
+            api.log("warn", f"Failed to read '{pdf_path}': {exc}")
             continue
 
         if reader.is_encrypted:
-            api.log("warning", f"Skipped encrypted PDF: {pdf_path}")
+            api.log("warn", f"Skipped encrypted PDF: {pdf_path}")
             continue
 
         metadata = _normalize_metadata(reader)
