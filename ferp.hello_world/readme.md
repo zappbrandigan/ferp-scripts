@@ -18,8 +18,7 @@ message, and returning the captured data.
 
 ## Behavior
 
-- Emits a structured result containing the target path, provided extension, and
-  any additional arguments configured in `config.json`.
+- Emits a structured result containing the target path and provided extension.
 - Shows how `api.log`, `api.request_input`, and `api.emit_result` behave inside FERP.
 
 ## Notes

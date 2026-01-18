@@ -4,32 +4,14 @@
       "id": "ferp.zip_dir",
       "name": "Compress: Zip",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.zip_dir/script.py",
-        "other": "scripts/ferp.zip_dir/script.py"
-      },
-      "args": [
-        "{target}"
-      ],
-      "dependencies": [],
-      "requires_input": false,
+      "script": "scripts/ferp.zip_dir/script.py",
       "target": "highlighted_directory"
     },
     {
       "id": "ferp.unzip_file",
       "name": "Compress: Unzip",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.unzip_file/script.py",
-        "other": "scripts/ferp.unzip_file/script.py"
-      },
-      "args": [
-        "{target}"
-      ],
-      "dependencies": [],
-      "requires_input": false,
+      "script": "scripts/ferp.unzip_file/script.py",
       "target": "highlighted_file",
       "file_extensions": [
         ".zip"
@@ -39,47 +21,24 @@
       "id": "ferp.extract_pdf_metadata",
       "name": "Extract: PDF Metadata",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.extract_pdf_metadata/script.py",
-        "other": "scripts/ferp.extract_pdf_metadata/script.py"
-      },
-      "args": [],
+      "script": "scripts/ferp.extract_pdf_metadata/script.py",
       "dependencies": [
         "PyPDF2>=3.0"
       ],
-      "requires_input": true,
       "target": "highlighted_directory"
     },
     {
       "id": "ferp.backup_dir",
       "name": "Archive: Backup",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.backup_dir/script.py",
-        "other": "scripts/ferp.backup_dir/script.py"
-      },
-      "args": [
-        "{target}"
-      ],
-      "dependencies": [],
-      "requires_input": false,
+      "script": "scripts/ferp.backup_dir/script.py",
       "target": "highlighted_directory"
     },
     {
       "id": "ferp.restore_backup",
       "name": "Archive: Restore Backup",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.restore_backup/script.py",
-        "other": "scripts/ferp.restore_backup/script.py"
-      },
-      "args": [
-        "{target}"
-      ],
-      "requires_input": false,
+      "script": "scripts/ferp.restore_backup/script.py",
       "target": "highlighted_file",
       "file_extensions": [
         ".backup.zip"
@@ -89,18 +48,10 @@
       "id": "ferp.extractor",
       "name": "Extract: Email Attachments",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.extractor/script.py",
-        "other": "scripts/ferp.extractor/script.py"
-      },
-      "args": [
-        "{target}"
-      ],
+      "script": "scripts/ferp.extractor/script.py",
       "dependencies": [
         "extract-msg>=0.55.0"
       ],
-      "requires_input": false,
       "target": "highlighted_file",
       "file_extensions": [
         ".zip"
@@ -110,155 +61,89 @@
       "id": "ferp.flatten_dir",
       "name": "Normalize: Flatten Directory",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.flatten_dir/script.py",
-        "other": "scripts/ferp.flatten_dir/script.py"
-      },
-      "args": [
-        "{target}"
-      ],
-      "requires_input": false,
+      "script": "scripts/ferp.flatten_dir/script.py",
       "target": "highlighted_directory"
     },
     {
       "id": "ferp.query_pdf",
       "name": "Query: PDF Files",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.query_pdf/script.py",
-        "other": "scripts/ferp.query_pdf/script.py"
-      },
-      "args": [],
+      "script": "scripts/ferp.query_pdf/script.py",
       "dependencies": [
         "PyPDF2>=3.0"
       ],
-      "requires_input": true,
       "target": "highlighted_directory"
     },
     {
       "id": "ferp.merge_tabular",
       "name": "Merge: Tabular Data",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.merge_tabular/script.py",
-        "other": "scripts/ferp.merge_tabular/script.py"
-      },
-      "args": [],
+      "script": "scripts/ferp.merge_tabular/script.py",
       "dependencies": [
         "openpyxl>=3.1"
       ],
-      "requires_input": false,
       "target": "current_directory"
     },
     {
       "id": "ferp.summarize_tree",
       "name": "Summarize: Directory",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.summarize_tree/script.py",
-        "other": "scripts/ferp.summarize_tree/script.py"
-      },
-      "args": [],
-      "requires_input": false,
+      "script": "scripts/ferp.summarize_tree/script.py",
       "target": "highlighted_directory"
     },
     {
       "id": "ferp.normalize_pdf_names",
       "name": "Normalize: Cue Sheets File Names",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.normalize_pdf_names/script.py",
-        "other": "scripts/ferp.normalize_pdf_names/script.py"
-      },
-      "args": [],
+      "script": "scripts/ferp.normalize_pdf_names/script.py",
       "dependencies": [
         "googletrans==4.0.2",
         "Unidecode>=1.3.8"
       ],
-      "requires_input": false,
       "target": "highlighted_directory"
     },
     {
       "id": "ferp.hello_world",
       "name": "Test: Hello World",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.hello_world/script.py",
-        "other": "scripts/ferp.hello_world/script.py"
-      },
-      "args": [
-        "{target}"
-      ],
-      "dependencies": [],
-      "requires_input": true,
+      "script": "scripts/ferp.hello_world/script.py",
       "target": "current_directory"
     },
     {
       "id": "ferp.rename_fox_emails",
       "name": "Rename: Fox Emails",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.rename_fox_emails/script.py",
-        "other": "scripts/ferp.rename_fox_emails/script.py"
-      },
-      "args": [],
-      "dependencies": [],
-      "requires_input": false,
+      "script": "scripts/ferp.rename_fox_emails/script.py",
       "target": "highlighted_directory"
     },
     {
       "id": "ferp.moonbug",
       "name": "Convert: Moonbug to PDF",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.moonbug/script.py",
-        "other": "scripts/ferp.moonbug/script.py"
-      },
-      "args": [],
+      "script": "scripts/ferp.moonbug/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
       ],
-      "requires_input": true,
       "target": "highlighted_directory"
     },
     {
       "id": "ferp.rename_uvs",
       "name": "Rename: UVS",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.rename_uvs/script.py",
-        "other": "scripts/ferp.rename_uvs/script.py"
-      },
-      "args": [],
+      "script": "scripts/ferp.rename_uvs/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8"
       ],
-      "requires_input": true,
       "target": "highlighted_directory"
     },
     {
       "id": "ferp.excel_diff",
       "name": "Compare: Excel Diff",
       "version": "1.0.0",
-      "type": "python",
-      "script": {
-        "windows": "scripts/ferp.excel_diff/script.py",
-        "other": "scripts/ferp.excel_diff/script.py"
-      },
-      "args": [],
+      "script": "scripts/ferp.excel_diff/script.py",
       "dependencies": [
         "openpyxl>=3.1"
       ],
-      "requires_input": true,
       "target": "current_directory"
     }
   ]

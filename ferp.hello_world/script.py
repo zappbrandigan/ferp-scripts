@@ -21,8 +21,8 @@ def main(context: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     api.emit_result(
         {
             "message": "Hello from FSCP!",
+            "target_path": str(context.target_path),
             "extension": extension,
-            "args": context.args,
         }
     )
 

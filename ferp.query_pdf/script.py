@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import csv
 import json
 import re
@@ -9,28 +8,6 @@ from pathlib import Path
 from PyPDF2 import PdfReader
 
 from ferp.fscp.scripts import sdk
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Search PDF files for text.")
-    parser.add_argument("query", nargs="?", help="Text or pattern to search for.")
-    parser.add_argument(
-        "--regex",
-        action="store_true",
-        help="Treat the query as a regular expression.",
-    )
-    parser.add_argument(
-        "--case-sensitive",
-        action="store_true",
-        help="Perform a case-sensitive search (default: insensitive).",
-    )
-    parser.add_argument(
-        "--context-chars",
-        type=int,
-        default=80,
-        help="Number of characters of context to capture around each match (default: 80).",
-    )
-    return parser
 
 
 def _compile_pattern(
@@ -121,43 +98,44 @@ def _write_csv(csv_path: Path, rows: list[dict[str, object]]) -> None:
 
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    parser = _build_parser()
+    response = api.request_input(
+        "Enter search query",
+        id="query_pdf_options",
+        fields=[
+            {"id": "regex", "type": "bool", "label": "Use regex", "default": False},
+            {
+                "id": "case_sensitive",
+                "type": "bool",
+                "label": "Case sensitive",
+                "default": False,
+            },
+        ],
+    )
     try:
-        options = parser.parse_args(ctx.args or [])
-    except SystemExit:
-        raise ValueError("Invalid arguments supplied to query_pdf script.")
+        payload = json.loads(response)
+    except json.JSONDecodeError:
+        payload = {"value": response}
 
-    query = options.query
-    regex = options.regex
-    case_sensitive = options.case_sensitive
-
-    if not query:
-        response = api.request_input(
-            "Enter search query",
-            id="query_pdf_options",
-            fields=[
-                {"id": "regex", "type": "bool", "label": "Use regex", "default": regex},
-                {
-                    "id": "case_sensitive",
-                    "type": "bool",
-                    "label": "Case sensitive",
-                    "default": case_sensitive,
-                },
-            ],
-        )
-        if response is None:
-            api.exit(code=1)
-            return
-        try:
-            payload = json.loads(response)
-        except json.JSONDecodeError:
-            payload = {"value": response}
-        query = str(payload.get("value", "")).strip()
-        regex = bool(payload.get("regex", regex))
-        case_sensitive = bool(payload.get("case_sensitive", case_sensitive))
+    query = str(payload.get("value", "")).strip()
+    regex = bool(payload.get("regex", False))
+    case_sensitive = bool(payload.get("case_sensitive", False))
 
     if not query:
         raise ValueError("Search query is required.")
+
+    context_chars = 80
+    context_response = api.request_input(
+        "Context characters around each match",
+        default=str(context_chars),
+        id="query_pdf_context",
+    ).strip()
+    if context_response:
+        try:
+            context_chars = int(context_response)
+        except ValueError as exc:
+            raise ValueError("Context characters must be a number.") from exc
+        if context_chars <= 0:
+            raise ValueError("Context characters must be greater than zero.")
 
     root_path = ctx.target_path
     if not root_path.exists() or not root_path.is_dir():
@@ -188,7 +166,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 pdf_path,
                 root_path,
                 pattern,
-                options.context_chars,
+                context_chars,
                 api,
             )
         except Exception as exc:  # noqa: BLE001
