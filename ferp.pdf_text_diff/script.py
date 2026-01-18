@@ -171,7 +171,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         )
 
     summary_path = output_dir / f"{a_path.stem}_vs_{b_path.stem}_pdf_text_diff.txt"
-    max_result_lines = 200
+    max_result_lines = 25
     result_lines = summary_lines[:max_result_lines]
     if len(summary_lines) > max_result_lines:
         result_lines.append(
