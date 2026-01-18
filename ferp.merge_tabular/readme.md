@@ -1,20 +1,22 @@
 # Merge Tabular Data
 
-Combines CSV and XLSX files in the current directory when they share the same
-column headers.
+Combines CSV and XLSX files in the current working directory (shown in the app
+title bar) when they share the same column headers.
 
 ---
 
 ## FERP Integration
 
-- Operates on the `current directory` shown in the File Navigator.
+- Operates on the `current directory` (the current working path shown in the app
+  title bar).
 - Scans only the top-level files (no subdirectories).
 - Produces one merged CSV per matching header group without touching the source
   files.
 
 ## Usage
 
-1. Navigate to a directory that contains the tabular files you want to merge.
+1. Navigate to a directory that contains the tabular files you want to merge
+   (this becomes the current working path shown in the app title bar).
 2. Run `Merge Tabular Data` from the Scripts panel.
 3. Review the output panel summary for merged files, skipped files, and schemas
    that had no partner.

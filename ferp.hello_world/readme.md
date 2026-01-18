@@ -7,12 +7,14 @@ message, and returning the captured data.
 
 ## FERP Integration
 
-- Runs against the `current directory` shown in the File Navigator.
+- Runs against the `current directory` (the current working path shown in the
+  app title bar).
 - Prompts for a file extension (defaults to `.txt`) using FERP's dialog.
 
 ## Usage
 
-1. Highlight any folder in FERP.
+1. Navigate to any folder in FERP (this becomes the current working path shown in
+   the app title bar).
 2. Run **Hello World** from the Scripts panel.
 3. Enter an extension when prompted, or accept the default.
 

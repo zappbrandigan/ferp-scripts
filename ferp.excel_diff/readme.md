@@ -7,15 +7,17 @@ CSV output.
 
 ## FERP Integration
 
-- Operates on the `current directory` in the File Navigator.
+- Operates on the `current directory` (the current working path shown in the app
+  title bar).
 - Prompts for the two Excel files to compare and optional sheet names.
 - Emits a summary of differences and can write a CSV report.
 
 ## Usage
 
-1. Highlight the directory containing the Excel files in FERP.
+1. Navigate to the directory containing the Excel files in FERP (this becomes the current working path shown in
+   the app title bar).
 2. Run `Compare Excel Diff` from the Scripts panel.
-3. Enter the two file names (relative to the highlighted directory).
+3. Enter the two file names (relative to the current working directory).
 4. Optionally enter comma-separated sheet names to compare.
 
 ## Behavior
