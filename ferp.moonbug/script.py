@@ -66,16 +66,20 @@ def _get_outfile_from_cells(worksheet):
 
     pd_cell_row, pd_cell_col = int(pd_cell[1:]), int(column_numbers[pd_cell[0]])
     pd_title = _cell_text(worksheet.Cells(pd_cell_row, pd_cell_col).Value).upper()
+    pd_title = _strip_illegal_filename_chars(pd_title)
     pd_title = _collapse_spaces(pd_title)
 
     ep_cell_row, ep_cell_col = int(ep_cell[1:]), int(column_numbers[ep_cell[0]])
     ep_title = _cell_text(worksheet.Cells(ep_cell_row, ep_cell_col).Value)
     ep_title = ep_title.replace("\u2019", "'")
+    ep_title = _strip_illegal_filename_chars(ep_title)
     ep_title = _collapse_spaces(ep_title)
     ep_title = _titlecase(ep_title) if ep_title else None
 
     no_cell_row, no_cell_col = int(no_cell[1:]), int(column_numbers[no_cell[0]])
     ep_number = _cell_text(worksheet.Cells(no_cell_row, no_cell_col).Value)
+    ep_number = _strip_illegal_filename_chars(ep_number)
+    ep_number = _collapse_spaces(ep_number)
     ep_number = f"{ep_number} Vrsn" if ep_number else "None Vrsn"
 
     return _escape_file_name(f"{pd_title}   {ep_title}  {ep_number}")
@@ -98,6 +102,11 @@ def _cell_text(value) -> str:
 def _collapse_spaces(text: str) -> str:
     """Reduce internal whitespace to single spaces."""
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _strip_illegal_filename_chars(text: str) -> str:
+    """Replace illegal filename characters with spaces for later collapsing."""
+    return re.sub(r"[<>:\\\"/|?!*]", " ", text)
 
 
 def _escape_file_name(file_name):
