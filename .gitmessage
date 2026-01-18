@@ -1,49 +1,95 @@
-# <type>(<scope>): <short summary>
+# Commit format (Conventional Commits):
+#   <type>(<scope>): <description>
+#   <type>: <description>              # scope is optional
+#   <type>(<scope>)!: <description>    # use ! for breaking changes
 #
-# Examples:
-#   feat(rename): support regex-based episode normalization
-#   fix(unzip): handle nested archives safely
-#   perf(fs): reduce directory walk overhead for large trees
+# The description SHOULD be in the imperative mood (command form) and
+# describe the outcome of the change (script behavior), not the
+# implementation steps.
 #
-# Types:
+# Good descriptions:
+#   feat(script): add PDF text diff with optional unified-diff report
+#   fix(script): prevent double spaces after illegal character stripping
+#   build(release): add helper for per-script version bumping
+#   feat(fscp)!: require host acknowledgement before destructive actions
+#
+# Bad descriptions:
+#   feat(script): add script
+#   fix(script): bug fix
+#   refactor(script): refactor code
+#
+# --------------------------------------------------------------------
+# Commit Types (choose ONE; custom types are allowed but keep consistent):
+#
 #   feat      | new script behavior or capability
-#   fix       | bug fix in script logic or output
-#   refactor  | internal cleanup without behavior change
+#   fix       | bug fix in script logic, output, or safety checks
+#   refactor  | internal cleanup with no behavior change
 #   perf      | performance improvement in script execution
-#   docs      | script docs, usage examples, or comments
-#   chore     | maintenance, formatting, or housekeeping
-#   test      | script tests, fixtures, or harness updates
-#   build     | packaging or distribution wiring
-#   ci        | automation pipelines or checks
-#   deps      | dependency updates
+#   docs      | script docs, usage examples, or in-script comments
+#   chore     | formatting, housekeeping, or maintenance
+#   build     | packaging, distribution, or release tooling
 #
-# Suggested scopes:
-#   flatten | folder flattening utilities
-#   rename  | rename/normalize scripts and helpers
-#   unzip   | archive extraction routines
-#   zip     | archive creation routines
-#   pdf     | PDF-related scripts
-#   excel   | Excel/CSV processing scripts
-#   fs      | filesystem traversal utilities
-#   common  | shared helpers used across scripts
-#   fscp    | script-side FSCP protocol behavior
+# --------------------------------------------------------------------
+# Suggested Scopes (choose the narrowest that fits):
 #
-# Body (script behavior):
-# - Script(s) affected:
-# - Inputs changed?
-# - Outputs changed?
-# - Side effects (filesystem writes/deletes/moves)?
+# Scope selection guidance:
+# - Pick the scope for the primary change.
+# - If a commit touches both a script and config.json as incidental wiring,
+#   use "script" and document the config change in the body.
+# - Use "config" only when registry/manifest changes are the main purpose.
+#
+#   script        | single-script change
+#   scripts       | multiple scripts changed in one commit
+#   fscp          | script-side FSCP behavior or helpers
+#   config        | script registry / config.json / manifest changes
+#   release       | versioning, tagging, and release automation
+#
+# --------------------------------------------------------------------
+# Body and Footers
+#
+# Use labeled sections with complete sentences.
+# Omit sections that are not applicable.
+#
+# Summary:
+# Expand on the subject line in 1–3 sentences describing the behavioral change.
+#
+# Script Behavior:
+# - Scripts Affected: list module names (e.g., ferp.pdf_text_diff)
+# - Inputs: prompts or variables added/removed/changed; if none, state "Unchanged."
+# - Outputs: logs, results, or artifacts added/removed/changed; if none, state "Unchanged."
+# - Filesystem Effects: files written, moved, or deleted; if none, state "None."
 #
 # FSCP Contract (if applicable):
-# - Messages emitted/changed (log/progress/request_input/result/exit):
-# - Stdout/stderr behavior changes:
-# - Envelope/schema changes:
+# - Messages: message types emitted, consumed, or changed
 #
-# Safety Checklist:
-# - Destructive operation? (yes/no; describe safeguards)
-# - Backwards compatible with host? (yes/no; required host changes)
+# Safety:
+# State whether the script performs destructive operations and the safeguards.
+# If non-destructive, explicitly state: "Non-destructive."
 #
-# References:
-# - Issue/Ticket:
-# - Sample files / repro steps:
-# - Related commits:
+# Compatibility:
+# State whether the change is backwards compatible with the host.
+# If NOT compatible, specify required host/version changes.
+#
+# Breaking Changes:
+# If the change is breaking, do BOTH of the following:
+#   1) add `!` after <type>(<scope>) in the subject line, and
+#   2) add a footer starting with `BREAKING CHANGE:` describing the break
+#      and the required migration steps.
+#
+# Example footer:
+#   BREAKING CHANGE: The script now requires an explicit confirmation
+#   message from the host before deleting files.
+#
+# References (skip if none):
+# Use footer-style tokens when possible:
+#   Refs: ABC-123
+#   Closes #123
+#   Relates-to: <link-or-id>
+#
+# --------------------------------------------------------------------
+# Style Rules:
+# - Use the imperative mood in the subject line (e.g., "add", "fix", "prevent").
+# - Use complete sentences in the body.
+# - Prioritize behavior, contracts, and side effects over implementation detail.
+# - Write so the commit message can stand alone without reading the diff.
+# - If you claim "Unchanged" or "None," ensure the diff supports it.
