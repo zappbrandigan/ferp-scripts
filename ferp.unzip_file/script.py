@@ -2,15 +2,15 @@ import shutil
 import zipfile
 from pathlib import Path, PurePosixPath
 
+import py7zr
+
 from ferp.fscp.scripts import sdk
 
 
-def _common_root(members: list[zipfile.ZipInfo]) -> str | None:
+def _common_root(paths: list[str]) -> str | None:
     root: str | None = None
-    for info in members:
-        parts = [
-            part for part in PurePosixPath(info.filename).parts if part not in {"", "."}
-        ]
+    for path in paths:
+        parts = [part for part in PurePosixPath(path).parts if part not in {"", "."}]
         if not parts:
             continue
         head = parts[0]
@@ -41,8 +41,8 @@ def _flatten_nested_root(root: Path) -> None:
 
 
 def _extract(zip_path: Path, api: sdk.ScriptAPI) -> None:
-    if not zip_path.exists() or zip_path.suffix.lower() != ".zip":
-        raise ValueError("Selected file is not a zip archive.")
+    if not zip_path.exists() or zip_path.suffix.lower() not in {".zip", ".7z"}:
+        raise ValueError("Selected file is not a zip or 7z archive.")
 
     output_dir = zip_path.parent / zip_path.stem
     if output_dir.exists():
@@ -59,17 +59,27 @@ def _extract(zip_path: Path, api: sdk.ScriptAPI) -> None:
             )
             return
 
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        members = zf.infolist()
-        root_name = _common_root(members)
-        extract_root = output_dir
-        output_dir.mkdir(exist_ok=True)
+    extract_root = output_dir
+    output_dir.mkdir(exist_ok=True)
 
-        total = len(members) or 1
-        for idx, member in enumerate(members, start=1):
-            zf.extract(member, extract_root)
-            if idx == 1 or idx == total or idx % 25 == 0:
-                api.progress(current=idx, total=total, unit="files")
+    if zip_path.suffix.lower() == ".zip":
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            members = zf.infolist()
+            root_name = _common_root([member.filename for member in members])
+
+            total = len(members) or 1
+            for idx, member in enumerate(members, start=1):
+                zf.extract(member, extract_root)
+                if idx == 1 or idx == total or idx % 25 == 0:
+                    api.progress(current=idx, total=total, unit="files")
+    else:
+        with py7zr.SevenZipFile(zip_path, mode="r") as zf:
+            names = zf.getnames()
+            root_name = _common_root(names)
+            total = len(names) or 1
+            api.progress(current=0, total=total, unit="files")
+            zf.extractall(path=extract_root)
+            api.progress(current=total, total=total, unit="files")
 
     if root_name == output_dir.name:
         _flatten_nested_root(output_dir)

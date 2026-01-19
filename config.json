@@ -12,9 +12,12 @@
       "name": "Compress: Unzip",
       "version": "1.0.0",
       "script": "scripts/ferp.unzip_file/script.py",
+      "dependencies": [
+        "py7zr>=1.1.2"
+      ],
       "target": "highlighted_file",
       "file_extensions": [
-        ".zip"
+        ".zip", ".7z"
       ]
     },
     {
