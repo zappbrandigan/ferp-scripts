@@ -167,6 +167,16 @@
         "reportlab>=4.4.9"
       ],
       "target": "highlighted_directory"
+    },
+    {
+      "id": "ferp.pdf_header",
+      "name": "Process: PDF Header",
+      "version": "1.0.0",
+      "script": "scripts/ferp.pdf_header/script.py",
+      "dependencies": [
+        "PyPDF2>=3.0"
+      ],
+      "target": "highlighted_directory"
     }
   ]
 }
