@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import csv
 import json
+import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from PyPDF2 import PdfReader
@@ -13,6 +15,55 @@ def _collect_pdfs(root: Path, recursive: bool) -> list[Path]:
     if recursive:
         return sorted(root.rglob("*.pdf"))
     return sorted(path for path in root.glob("*.pdf") if path.is_file())
+
+
+def _extract_xmp(reader: PdfReader) -> str | None:
+    try:
+        root = reader.trailer.get("/Root")
+        if not root:
+            return None
+        if hasattr(root, "get_object"):
+            root = root.get_object()
+        metadata_ref = root.get("/Metadata")
+        if not metadata_ref:
+            return None
+        if hasattr(metadata_ref, "get_object"):
+            metadata_ref = metadata_ref.get_object()
+        data = metadata_ref.get_data()
+    except Exception:  # noqa: BLE001
+        return None
+
+    if isinstance(data, bytes):
+        return data.decode("utf-8", errors="replace")
+    return str(data)
+
+
+def _parse_xmp(xmp: str) -> dict[str, str]:
+    match = re.search(r"(<x:xmpmeta\b.*?</x:xmpmeta>)", xmp, re.DOTALL)
+    xml_payload = match.group(1) if match else xmp
+    try:
+        root = ET.fromstring(xml_payload)
+    except ET.ParseError:
+        return {}
+
+    ns = {
+        "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+        "ferp": "https://tulbox.app/ferp/xmp/1.0",
+    }
+
+    publishers = [
+        (li.text or "").strip()
+        for li in root.findall(".//ferp:publishers/rdf:Bag/rdf:li", ns)
+        if (li.text or "").strip()
+    ]
+
+    parsed: dict[str, str] = {}
+    if publishers:
+        parsed["ferp:namespace"] = ns["ferp"]
+        parsed["ferp:publishers"] = "; ".join(publishers)
+        parsed["ferp:publishers_count"] = str(len(publishers))
+
+    return parsed
 
 
 def _normalize_metadata(reader: PdfReader) -> dict[str, str]:
@@ -115,6 +166,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             continue
 
         metadata = _normalize_metadata(reader)
+        xmp = _extract_xmp(reader)
+        if xmp:
+            parsed_xmp = _parse_xmp(xmp)
+            if parsed_xmp:
+                metadata.update(parsed_xmp)
+            else:
+                metadata["XMP"] = xmp
         relative_path = str(pdf_path.relative_to(target_dir))
         if metadata:
             api.log("info", f"{relative_path}: {json.dumps(metadata, sort_keys=True)}")

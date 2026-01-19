@@ -155,6 +155,18 @@
         "pdfplumber>=0.11.8"
       ],
       "target": "current_directory"
+    },
+    {
+      "id": "ferp.process_cue_sheets",
+      "name": "Process: Stamp Cue Sheets",
+      "version": "1.0.0",
+      "script": "scripts/ferp.process_cue_sheets/script.py",
+      "dependencies": [
+        "pdfplumber>=0.11.8",
+        "PyPDF2>=3.0",
+        "reportlab>=4.4.9"
+      ],
+      "target": "highlighted_directory"
     }
   ]
 }
