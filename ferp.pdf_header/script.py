@@ -91,7 +91,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     if not target_dir.exists() or not target_dir.is_dir():
         raise ValueError("Select a directory before running this script.")
 
-    scale = 0.95  # default scale factor for content resizing
+    scale = 0.90  # default scale factor for content resizing
     top_space_pts = 50.0  # default top space in points
 
     response = api.request_input(

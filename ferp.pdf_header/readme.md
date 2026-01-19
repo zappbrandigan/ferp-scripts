@@ -22,7 +22,7 @@ content to create room for a header.
 
 - Scales and shifts the first page content to create top space.
 - Keeps the first-page content horizontally centered after scaling.
-- Uses a fixed scale factor of `0.95`.
+- Uses a fixed scale factor of `0.90`.
 - Preserves the rest of the document pages unchanged.
 - Overwrites the original files in place using a safe temp-file swap.
 
