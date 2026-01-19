@@ -130,6 +130,16 @@
       "target": "highlighted_directory"
     },
     {
+      "id": "ferp.convert_excel",
+      "name": "Convert: Excel to PDF",
+      "version": "1.0.0",
+      "script": "scripts/ferp.convert_excel/script.py",
+      "dependencies": [
+        "pywin32>=306; platform_system == \"Windows\""
+      ],
+      "target": "highlighted_directory"
+    },
+    {
       "id": "ferp.rename_uvs",
       "name": "Rename: UVS",
       "version": "1.0.0",
