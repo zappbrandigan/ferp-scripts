@@ -15,19 +15,24 @@ content to create room for a header.
 
 1. Select the directory containing the PDFs you want to adjust.
 2. Run **Process: PDF Header** from the Scripts panel.
-3. Enter the top-space amount in points (default 50).
+3. Enter the top-space amount in points (default: 50 points, range: 0 < points <= 200).
 4. Toggle subdirectory scanning if needed.
 
 ## Behavior
 
 - Scales and shifts the first page content to create top space.
 - Keeps the first-page content horizontally centered after scaling.
-- Uses a fixed scale factor of `0.90`.
+- Chooses the scale factor based on the top-space value:
+  - `<= 50` pts: `0.95`
+  - `<= 100` pts: `0.90`
+  - `<= 150` pts: `0.80`
+  - `<= 200` pts: `0.78`
 - Preserves the rest of the document pages unchanged.
 - Overwrites the original files in place using a safe temp-file swap.
+- Attempts to preserve document metadata (Info + XMP) when possible.
 
 ## Notes
 
-- The top-space value must be a number and cannot be negative.
+- The top-space value must be a number between 0 and 200.
 - Page-level annotations, links, and form fields on the first page are not preserved.
 - Consider keeping a backup of the originals before running in bulk.

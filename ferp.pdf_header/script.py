@@ -79,6 +79,19 @@ def _make_top_space_first_page_inplace(
             os.unlink(tmp_path)
 
 
+def _scale_from_top_space(top_space_pts: float) -> float:
+    if top_space_pts <= 50:
+        return 0.95
+    if top_space_pts <= 100:
+        return 0.9
+    elif top_space_pts <= 150:
+        return 0.8
+    elif top_space_pts <= 200:
+        return 0.78
+    else:
+        return 1.0
+
+
 def _collect_pdfs(root: Path, recursive: bool) -> list[Path]:
     if recursive:
         return sorted(path for path in root.rglob("*.pdf") if path.is_file())
@@ -92,7 +105,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         raise ValueError("Select a directory before running this script.")
 
     scale = 0.90  # default scale factor for content resizing
-    top_space_pts = 50.0  # default top space in points
+    top_space_pts = 50  # default top space in points
 
     response = api.request_input(
         "PDF Header Adjustment: Top Space Amount (points)",
@@ -119,10 +132,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     if top_space_response:
         try:
             top_space_pts = float(top_space_response)
-        except ValueError as exc:
-            raise ValueError("Top space must be a number.") from exc
-        if top_space_pts < 0:
-            raise ValueError("Top space must be zero or greater.")
+            scale = _scale_from_top_space(top_space_pts)
+        except ValueError:
+            api.emit_result({"Value Error": "Top space must be a number."})
+            api.exit(code=1)
+        if top_space_pts <= 0 or top_space_pts > 200:
+            api.emit_result({"Out of Range": "Top space must be between 0 and 200."})
+            api.exit(code=1)
 
     recursive = bool(payload.get("recursive", False))
     pdf_files = _collect_pdfs(target_dir, recursive=recursive)
@@ -139,6 +155,14 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             top_space_pts=top_space_pts,
             scale=scale,
         )
+
+    api.emit_result(
+        {
+            "Total Files Changed": total_files,
+            "Top Space Size": str(top_space_pts) + "pts",
+            "Scale Factor": str(round(scale, 3)),
+        }
+    )
 
 
 if __name__ == "__main__":
