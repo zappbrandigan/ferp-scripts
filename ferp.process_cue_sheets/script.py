@@ -1179,12 +1179,13 @@ def draw_top_right_badge(
 
 def add_stamp(
     pdf_path: Path,
+    output_path: Path,
     matched_publishers: list[str],
     deal_start_date_text: str,
     controlled_territory_text: str,
 ) -> None:
-    font_path = Path(__file__).resolve() / "assets" / "Calibrib.ttf"
-    logo_path = Path(__file__).resolve() / "assets" / "logo.jpg"
+    font_path = Path(__file__).resolve().parent / "assets" / "Calibrib.ttf"
+    logo_path = Path(__file__).resolve().parent / "assets" / "logo.jpg"
     pdfmetrics.registerFont(TTFont("Calibri Bold", str(font_path)))
 
     reader = PdfReader(str(pdf_path))
@@ -1252,10 +1253,8 @@ def add_stamp(
     except Exception:  # noqa: BLE001
         pass
 
-    out_dir = pdf_path.parent / "_stamped"
-    out_dir.mkdir(exist_ok=True)
-    out_path = out_dir / pdf_path.name
-    with out_path.open("wb") as handle:
+    output_path.parent.mkdir(exist_ok=True)
+    with output_path.open("wb") as handle:
         writer.write(handle)
 
     if temp_path.exists():
@@ -1327,6 +1326,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "label": "Scan subdirectories",
                 "default": False,
             },
+            {
+                "id": "in_place",
+                "type": "bool",
+                "label": "Overwrite existing PDFs (stamp/metadata in place)",
+                "default": False,
+            },
         ],
     )
     payload: dict[str, object]
@@ -1336,6 +1341,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         payload = {}
 
     recursive = bool(payload.get("recursive", False))
+    in_place = bool(payload.get("in_place", False))
     cat_code = str(payload.get("value", "")).lower().strip()
     if cat_code not in pubs.keys():
         raise ValueError(f"Unknown category code '{cat_code}'")
@@ -1382,18 +1388,34 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             xmp_bytes = build_xmp_publishers(matched_publishers)
             temp_path = pdf_path.with_suffix(".xmp.tmp.pdf")
             set_xmp_metadata(pdf_path, temp_path, xmp_bytes)
-            temp_path.replace(pdf_path)
             deal_start_date_text, controlled_territory_text = resolve_publisher_fields(
                 matched_publishers,
                 cat_object,
             )
-            add_stamp(
-                pdf_path,
-                matched_publishers,
-                deal_start_date_text,
-                controlled_territory_text,
-            )
-            created_dirs.add("_stamp")
+            if in_place:
+                temp_path.replace(pdf_path)
+                add_stamp(
+                    pdf_path,
+                    pdf_path,
+                    matched_publishers,
+                    deal_start_date_text,
+                    controlled_territory_text,
+                )
+            else:
+                out_dir = pdf_path.parent / "_stamped"
+                out_path = out_dir / pdf_path.name
+                try:
+                    add_stamp(
+                        temp_path,
+                        out_path,
+                        matched_publishers,
+                        deal_start_date_text,
+                        controlled_territory_text,
+                    )
+                finally:
+                    if temp_path.exists():
+                        temp_path.unlink()
+                created_dirs.add("_stamped")
         else:
             nop_dir = pdf_path.parent / "_nop"
             nop_dir.mkdir(exist_ok=True)
