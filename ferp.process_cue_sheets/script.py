@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
+import os
 import re
 import tempfile
 import unicodedata
+import warnings
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +17,8 @@ import pdfplumber
 from pdfplumber.page import Page
 from platformdirs import user_cache_dir
 from PyPDF2 import PdfReader, PdfWriter, Transformation
+from PyPDF2._page import PageObject
+from PyPDF2.errors import PdfReadWarning
 from PyPDF2.generic import DictionaryObject, NameObject, NumberObject, StreamObject
 
 # from reportlab.lib.pagesizes import LETTER
@@ -24,6 +29,9 @@ from reportlab.pdfgen import canvas
 from typing_extensions import Literal
 
 from ferp.fscp.scripts import sdk
+
+warnings.filterwarnings("ignore", category=PdfReadWarning)
+logging.getLogger("PyPDF2").setLevel(logging.ERROR)
 
 LOGO_RE = re.compile(r"(?<![A-Z0-9])logos?(?![A-Z0-9])", re.IGNORECASE)
 _CONTEXT_EE_RE = re.compile(r"(?<![A-Z0-9])EE(?![A-Z0-9])")
@@ -1554,6 +1562,88 @@ def resolve_publisher_fields(
     return effective_date, territory
 
 
+def scale_from_top_space(top_space_pts: float) -> float:
+    if top_space_pts <= 50:
+        return 0.95
+    if top_space_pts <= 100:
+        return 0.9
+    if top_space_pts <= 150:
+        return 0.8
+    if top_space_pts <= 200:
+        return 0.78
+    return 1.0
+
+
+def make_top_space_first_page_inplace(
+    pdf_path: Path,
+    top_space_pts: float,
+    *,
+    scale: float | None = None,
+) -> None:
+    reader = PdfReader(pdf_path)
+    writer = PdfWriter()
+    scale_value = scale if scale is not None else scale_from_top_space(top_space_pts)
+
+    for i, src_page in enumerate(reader.pages):
+        if i != 0:
+            writer.add_page(src_page)
+            continue
+
+        # Prefer CropBox visually; fall back to MediaBox
+        box = src_page.cropbox or src_page.mediabox
+        width = float(box.width)
+        height = float(box.height)
+
+        top_space = float(top_space_pts)
+        dx = (1.0 - scale_value) * width / 2.0
+        dy = (1.0 - scale_value) * height - top_space
+
+        dst_page = PageObject.create_blank_page(width=width, height=height)
+        transform = Transformation().scale(scale_value, scale_value).translate(dx, dy)
+        merge_transformed = getattr(dst_page, "merge_transformed_page", None)
+        if callable(merge_transformed):
+            merge_transformed(src_page, transform)
+        else:
+            add_transformation = getattr(src_page, "add_transformation", None)
+            if callable(add_transformation):
+                add_transformation(transform)
+            dst_page.merge_page(src_page)
+        writer.add_page(dst_page)
+
+    # ---- Copy Document Info metadata ----
+    if reader.metadata:
+        md: dict[str, str] = {}
+        for k, v in reader.metadata.items():
+            if k and v is not None:
+                md[str(k)] = str(v)
+        if md:
+            writer.add_metadata(md)
+
+    # ---- Best-effort XMP metadata preservation ----
+    try:
+        root_obj = reader.trailer.get("/Root")
+        root_dict = root_obj.get_object() if root_obj else None
+        if isinstance(root_dict, DictionaryObject):
+            xmp = root_dict.get("/Metadata")
+            if xmp is not None:
+                writer._root_object[NameObject("/Metadata")] = xmp
+    except Exception:
+        pass
+
+    # ---- Safe in-place overwrite ----
+    dir_name = os.path.dirname(pdf_path)
+    with tempfile.NamedTemporaryFile(delete=False, dir=dir_name, suffix=".pdf") as tmp:
+        tmp_path = tmp.name
+
+    try:
+        with open(tmp_path, "wb") as handle:
+            writer.write(handle)
+        os.replace(tmp_path, pdf_path)  # atomic on most platforms
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
 def resolve_multi_territory_rows(
     matched_publishers: list[str],
     category_entries: list[dict],
@@ -1604,8 +1694,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         pubs = json.load(handle)
 
     response = api.request_input(
-        "Category code (e.g., 'uvs', 'nbc-tv', etc.)",
-        id="ferp_process_cue_sheets_category_code",
+        "Publisher catalog code (e.g., 'uvs', 'amz', etc.)",
+        id="ferp_process_cue_sheets_cat_code",
         fields=[
             {
                 "id": "recursive",
@@ -1616,7 +1706,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             {
                 "id": "in_place",
                 "type": "bool",
-                "label": "Overwrite existing PDFs (stamp/metadata in place)",
+                "label": "Overwrite existing PDFs",
+                "default": False,
+            },
+            {
+                "id": "adjust_header",
+                "type": "bool",
+                "label": "Add header space",
                 "default": False,
             },
         ],
@@ -1629,6 +1725,22 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     recursive = bool(payload.get("recursive", False))
     in_place = bool(payload.get("in_place", False))
+    adjust_header = bool(payload.get("adjust_header", False))
+    header_top_space = 50.0
+    if adjust_header:
+        header_response = api.request_input(
+            "PDF Header Adjustment: Top Space Amount (points)",
+            id="ferp_process_cue_sheets_header_space",
+            default=str(header_top_space),
+        )
+        header_response = header_response.strip() if header_response else ""
+        if header_response:
+            try:
+                header_top_space = float(header_response)
+            except ValueError as exc:
+                raise ValueError("Top space must be a number.") from exc
+        if header_top_space <= 0 or header_top_space > 200:
+            raise ValueError("Top space must be between 0 and 200.")
     cat_code = str(payload.get("value", "")).lower().strip()
     if cat_code not in pubs.keys():
         raise ValueError(f"Unknown category code '{cat_code}'")
@@ -1675,6 +1787,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             xmp_bytes = build_xmp_publishers(matched_publishers)
             temp_path = pdf_path.with_suffix(".xmp.tmp.pdf")
             set_xmp_metadata(pdf_path, temp_path, xmp_bytes)
+            if adjust_header:
+                make_top_space_first_page_inplace(temp_path, header_top_space)
             deal_start_date_text, controlled_territory_text = resolve_publisher_fields(
                 matched_publishers,
                 cat_object,
@@ -1710,6 +1824,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         temp_path.unlink()
                 created_dirs.add("_stamped")
         else:
+            if adjust_header:
+                make_top_space_first_page_inplace(pdf_path, header_top_space)
             nop_dir = pdf_path.parent / "_nop"
             nop_dir.mkdir(exist_ok=True)
             pdf_path.replace(nop_dir / pdf_path.name)
