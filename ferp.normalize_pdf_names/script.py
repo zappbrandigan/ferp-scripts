@@ -46,6 +46,17 @@ _ARTICLE_MATCH_TRANSLATION = str.maketrans(
         "\u2019": "'",
     }
 )
+_ARTICLE_TOKENS = {
+    article.lower()
+    for articles in language_articles.values()
+    for article in articles
+}
+_ARTICLE_PREFIXES = tuple(
+    article.lower()
+    for articles in language_articles.values()
+    for article in articles
+    if article.endswith("'")
+)
 
 
 class UserResponse(TypedDict):
@@ -127,7 +138,8 @@ def _normalize_name(parsed: ParsedName) -> tuple[str | None, str | None]:
     if not production:
         return None, "unrepairable_structure"
 
-    production = _reposition_article(production)
+    if _has_candidate_article(production):
+        production = _reposition_article(production)
     production = _normalize_ascii(production)
     if not production:
         return None, "unrepairable_structure"
@@ -147,7 +159,10 @@ def _normalize_name(parsed: ParsedName) -> tuple[str | None, str | None]:
         raw_title = _normalize_spaces(parsed.episode_title or "")
         if not raw_title:
             return None, "unrepairable_structure"
-        episode_title = _reposition_article(raw_title)
+        if _has_candidate_article(raw_title):
+            episode_title = _reposition_article(raw_title)
+        else:
+            episode_title = raw_title
         episode_title = _normalize_ascii(episode_title)
         if not episode_title:
             return None, "unrepairable_structure"
@@ -400,6 +415,17 @@ def _detect_language(text: str) -> str | None:
     if lang not in language_articles:
         return None
     return lang
+
+
+def _has_candidate_article(text: str) -> bool:
+    tokens = text.split()
+    if not tokens:
+        return False
+    first = tokens[0]
+    normalized = first.translate(_ARTICLE_MATCH_TRANSLATION).lower()
+    if normalized in _ARTICLE_TOKENS:
+        return True
+    return any(normalized.startswith(prefix) for prefix in _ARTICLE_PREFIXES)
 
 
 def _reposition_article(text: str) -> str:

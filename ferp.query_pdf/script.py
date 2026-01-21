@@ -212,7 +212,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             "CSV Path": str(csv_path) if csv_path else None,
         }
     )
-    api.exit(code=0)
 
 
 if __name__ == "__main__":
