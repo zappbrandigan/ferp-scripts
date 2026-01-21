@@ -93,26 +93,47 @@ def _write_text(path: Path, content: str) -> None:
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     target_dir = ctx.target_path
-    if not target_dir.exists() or not target_dir.is_dir():
-        raise ValueError(f"Target '{target_dir}' is not a directory.")
 
     file_a = api.request_input(
         "First PDF file (relative to target directory)",
         id="pdf_text_diff_file_a",
-    ).strip()
+    )
     file_b = api.request_input(
         "Second PDF file (relative to target directory)",
         id="pdf_text_diff_file_b",
-    ).strip()
+    )
     if not file_a or not file_b:
-        raise ValueError("Both file_a and file_b are required.")
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Warning: Script Canceled",
+                "Info": "Both files are required.",
+            }
+        )
+        return
 
     a_path = _resolve_input_path(target_dir, file_a)
     b_path = _resolve_input_path(target_dir, file_b)
     if not a_path.exists():
-        raise FileNotFoundError(a_path)
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Warning: Script Canceled",
+                "Info": "File does not exist.",
+                "File Path": str(a_path),
+            }
+        )
+        return
     if not b_path.exists():
-        raise FileNotFoundError(b_path)
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Warning: Script Canceled",
+                "Info": "File does not exist.",
+                "File Path": str(b_path),
+            }
+        )
+        return
 
     api.log("info", f"Extracting text from '{a_path.name}' and '{b_path.name}'")
 
@@ -171,19 +192,14 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         )
 
     summary_path = output_dir / f"{a_path.stem}_vs_{b_path.stem}_pdf_text_diff.txt"
-    max_result_lines = 25
-    result_lines = summary_lines[:max_result_lines]
-    if len(summary_lines) > max_result_lines:
-        result_lines.append(
-            f"(truncated to {max_result_lines} lines; see full diff at {summary_path})"
-        )
     _write_text(summary_path, "\n".join(summary_lines).rstrip() + "\n")
 
     api.emit_result(
         {
-            "summary_path": str(summary_path),
-            "changes_found": counts["change_blocks"],
-            "results": "\n".join(result_lines).rstrip(),
+            "_title": "PDF Diff Created",
+            "Summary Path": str(summary_path),
+            "Changes Found": counts["change_blocks"],
+            "Results": "\n".join(summary_lines).rstrip(),
         }
     )
 

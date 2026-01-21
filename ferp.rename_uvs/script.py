@@ -91,8 +91,19 @@ def _move_to_dir(path: Path, directory: Path, base: str | None = None) -> Path:
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     target_dir = Path(ctx.target_path)
 
-    if not target_dir.exists() or not target_dir.is_dir():
-        raise RuntimeError(f"Target directory '{target_dir}' is not accessible.")
+    confirmation = api.confirm(
+        "This action will rename one or more files.",
+        id="ferp_rename_uvs_confirm",
+    )
+    if not confirmation:
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Renaming Cancled by User",
+                "Info": "No file operations were performed.",
+            }
+        )
+        return
 
     pdf_files = sorted(
         [
@@ -105,7 +116,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     if not pdf_files:
         api.log("info", f"No {_SUFFIX} files found to rename.")
-        api.emit_result({"renamed": 0})
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Warning: No PDF Files Found",
+                "File Path": str(target_dir),
+            }
+        )
         return
 
     renamed = 0
@@ -206,11 +223,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.emit_result(
         {
-            "renamed": renamed,
-            "skipped": skipped,
-            "needs_ocr": needs_ocr,
-            "check": check,
-            "total": len(pdf_files),
+            "Renamed": renamed,
+            "Skipped": skipped,
+            "Needs OCR": needs_ocr,
+            "Moved to Check": check,
+            "Total Files": len(pdf_files),
         }
     )
 

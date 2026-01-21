@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-import json
-import platform
 from pathlib import Path
+from typing import TypedDict
 
 from ferp.fscp.scripts import sdk
+
+
+class UserResponse(TypedDict):
+    value: str
+    recursive: bool
+    test: bool
 
 
 def _start_excel():
@@ -45,13 +50,9 @@ def _export_pdf(workbook, out_file: Path) -> None:
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     target = ctx.target_path
-    if not target.exists():
-        raise ValueError(f"Target does not exist: {target}")
-    if target.is_file() and target.suffix.lower() not in {".xls", ".xlsx", ".xlsm"}:
-        raise ValueError(f"Target must be an Excel file or directory: {target}")
 
-    response = api.request_input(
-        "Options for Convert Excel to PDF",
+    payload = api.request_input_json(
+        "Options for Excel to PDF Conversion",
         id="convert_excel_options",
         fields=[
             {
@@ -63,41 +64,47 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             {"id": "test", "type": "bool", "label": "Test mode", "default": False},
         ],
         show_text_input=False,
+        payload_type=UserResponse,
     )
-    if response is None:
-        api.exit(code=1)
-        return
 
-    try:
-        payload = json.loads(response)
-    except json.JSONDecodeError:
-        payload = {"value": response}
-
-    recursive = bool(payload.get("recursive", True))
-    is_test = bool(payload.get("test", False))
+    recursive = payload["recursive"]
+    is_test = payload["test"]
 
     xl_files = _collect_excel_files(target, recursive=recursive)
     total_files = len(xl_files)
     if total_files == 0:
         api.log("warn", "No Excel files found.")
-        api.emit_result({"dry_run": False, "target": str(target), "files_found": 0})
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Warning: No Excel Files Found",
+                **(
+                    {"Dry Run": False}
+                    if ctx.environment["host"]["platform"] == "darwin"
+                    else {}
+                ),
+                "Target": str(target),
+                "Files Found": 0,
+            }
+        )
         return
 
-    if platform.system().lower() != "windows":
+    if ctx.environment["host"]["platform"] != "win32":
         api.log(
             "warn",
             "Excel conversion requires Windows (win32com). Running dry mode only.",
         )
         api.emit_result(
             {
-                "dry_run": True,
-                "target": str(target),
-                "recursive": recursive,
-                "test": is_test,
-                "files_found": total_files,
+                "_status": "warn",
+                "_title": "Dry Run Complete",
+                "Dry Run": True,
+                "Target": str(target),
+                "Recursive": recursive,
+                "Is Test": is_test,
+                "Files Found": total_files,
             }
         )
-        api.exit(code=0)
         return
 
     if is_test:
@@ -113,6 +120,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     try:
         for index, file_path in enumerate(xl_files, start=1):
+            # coversion is slow, emit every iteration
             api.progress(current=index, total=total_files, unit="files")
             workbook = None
             try:
@@ -130,10 +138,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.emit_result(
         {
-            "dry_run": False,
-            "converted": converted,
-            "failures": failures,
-            "files_found": total_files,
+            "_status": "success",
+            "_title": "Excel Conversion Finished",
+            "Converted": converted,
+            "Failures": failures,
+            "Files Found": total_files,
         }
     )
 

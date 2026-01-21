@@ -33,8 +33,8 @@ def _restore(backup_path: Path, api: sdk.ScriptAPI) -> None:
         if not overwrite:
             api.emit_result(
                 {
-                    "message": "Restore cancelled",
-                    "output_dir": str(output_dir),
+                    "Message": "Restore cancelled",
+                    "Output Dir": str(output_dir),
                 }
             )
             return
@@ -51,14 +51,13 @@ def _restore(backup_path: Path, api: sdk.ScriptAPI) -> None:
         total = len(members) or 1
         for idx, member in enumerate(members, start=1):
             zf.extract(member, output_dir)
-            if idx == 1 or idx == total or idx % 25 == 0:
-                api.progress(current=idx, total=total, unit="files")
+            api.progress(current=idx, total=total, unit="files", every=25)
 
     api.emit_result(
         {
-            "message": "Backup restored",
-            "backup_path": str(backup_path),
-            "output_dir": str(output_dir),
+            "_title": "Backup Restored",
+            "Backup Path": str(backup_path),
+            "Output Dir": str(output_dir),
         }
     )
 

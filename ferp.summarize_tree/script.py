@@ -8,7 +8,6 @@ from typing import Iterator, cast
 from ferp.fscp.scripts import sdk
 
 MAX_DEPTH = 4
-MAX_OUTPUT_LINES = 500
 
 
 def _walk(root: Path) -> Iterator[tuple[Path, str, Counter[str]]]:
@@ -47,7 +46,16 @@ def _build_summary_table(entries: list[dict[str, object]]) -> str:
     headers = ["Directory", "Files", "Extension", "Count"]
     rows: list[list[str]] = []
     for entry in entries:
-        path = cast(str, entry["relative_path"] or ".")
+        rel_path = cast(str, entry["relative_path"] or ".")
+        if rel_path == ".":
+            path_label = "."
+        else:
+            parts = rel_path.split(os.sep)
+            depth = max(len(parts) - 1, 0)
+            name = parts[-1] if parts[-1] else rel_path
+            indent = "  " * depth
+            prefix = "|-- " if depth > 0 else ""
+            path_label = f"{indent}{prefix}{name}"
         total = entry["total_files"]
         extensions = cast(dict, entry["extensions"])
         if extensions:
@@ -58,11 +66,11 @@ def _build_summary_table(entries: list[dict[str, object]]) -> str:
             for index, (ext, count) in enumerate(sorted_exts):
                 label = ext or "<no extension>"
                 if index == 0:
-                    rows.append([path, str(total), label, str(count)])
+                    rows.append([path_label, str(total), label, str(count)])
                 else:
                     rows.append(["", "", label, str(count)])
         else:
-            rows.append([path, str(total), "(no files)", "0"])
+            rows.append([path_label, str(total), "(no files)", "0"])
 
     widths = []
     for col_index, header in enumerate(headers):
@@ -101,38 +109,38 @@ def _build_summary_table(entries: list[dict[str, object]]) -> str:
     return "\n".join(lines)
 
 
-def _truncate_lines(lines: list[str]) -> list[str]:
-    if len(lines) <= MAX_OUTPUT_LINES:
-        return lines
-    remaining = MAX_OUTPUT_LINES - 1
-    return lines[:remaining] + [
-        f"... output truncated after {MAX_OUTPUT_LINES} lines ..."
-    ]
+def _build_destination(directory: Path, base: str, suffix: str) -> Path:
+    candidate = directory / f"{base}{suffix}"
+    if not candidate.exists():
+        return candidate
+
+    counter = 1
+    while True:
+        candidate = directory / f"{base}_{counter:02d}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def _write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _format_header_markdown(header: dict[str, str]) -> list[str]:
+    lines = ["# Directory Summary", ""]
+    lines.extend(f"**{k}**: {v}  " for k, v in header.items())
+    lines.append("")
+    return lines
 
 
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     root = ctx.target_path
-    if not root.exists():
-        api.emit_result(
-            {
-                "root": str(root),
-                "summary": "Target path does not exist.\nNo directory summary generated.",
-            }
-        )
-        api.exit(code=0)
-        return
-    if not root.is_dir():
-        api.emit_result(
-            {
-                "root": str(root),
-                "summary": (
-                    f"Target is a file: {root}\nSelect a directory to summarize."
-                ),
-            }
-        )
-        api.exit(code=0)
-        return
+    confirm_export = api.confirm(
+        "Would you like to export results to Markdown?",
+        id="ferp_summarize_tree",
+    )
 
     summary = []
     for directory, rel_path, file_counter in _walk(root):
@@ -154,22 +162,37 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         )
 
     total_files = sum(entry["total_files"] for entry in summary)
-    header = [
-        "Directory Summary",
-        f"Root: {root}",
-        f"Max depth: {MAX_DEPTH}",
-        f"Directories scanned: {len(summary)}",
-        f"Total files: {total_files}",
-        "",
-    ]
-    lines = header + _build_summary_table(summary).splitlines()
-    lines = _truncate_lines(lines)
+    header = {
+        "Root": str(root),
+        "Max Depth": str(MAX_DEPTH),
+        "Directories Scanned": str(len(summary)),
+        "Total Files": str(total_files),
+    }
+    lines = _build_summary_table(summary).splitlines()
+    export_path: Path | None = None
+    if confirm_export:
+        output_dir = root if root.is_dir() else root.parent
+        base_name = f"{root.name or 'directory'}_summary"
+        export_path = _build_destination(output_dir, base_name, ".md")
+        md_wrapper = "```txt\n{table}\n```"
+        try:
+            markdown_lines = (
+                _format_header_markdown(header)
+                + md_wrapper.format(table=_build_summary_table(summary)).splitlines()
+            )
+            _write_text(export_path, "\n".join(markdown_lines).rstrip() + "\n")
+            api.log("info", f"Markdown summary written to {export_path}")
+        except OSError as exc:
+            api.log("error", f"Failed to write markdown summary: {exc}")
+            export_path = None
 
     api.emit_result(
         {
-            "root": str(root),
-            # "directories": summary,
-            "summary": "\n".join(lines),
+            "_title": "Directory Summary",
+            "Root": str(root),
+            "Markdown Path": str(export_path) if export_path else "Not exported.",
+            **(header),
+            "Extension Details": "\n" + "\n".join(lines),
         }
     )
     api.exit(code=0)

@@ -14,13 +14,14 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     if not confirm:
         api.emit_result(
             {
-                "message": "Script cancelled",
+                "_status": "warn",
+                "_title": "Script Canceled by User",
+                "Info": "No file operations were performed.",
             }
         )
         return
+
     target = ctx.target_path
-    if not target.exists() or not target.is_dir():
-        raise ValueError(f"Target must be a directory. Received: {target}")
 
     api.log("info", f"Flattening {target}")
 
@@ -52,8 +53,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 # Directory not empty (files yet to be processed); skip for now.
                 pass
 
-        if idx == 1 or idx == total or idx % 20 == 0:
-            api.progress(current=idx, total=total, unit="items")
+        api.progress(current=idx, total=total, unit="items", every=10)
 
     # Clean up any empty directories left after moving files.
     for dir_path in sorted(target.rglob("*"), reverse=True):
@@ -66,10 +66,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.emit_result(
         {
-            "message": "Directory flattened",
-            "target": str(target),
-            "files_moved": files_moved,
-            "directories_removed": dirs_removed,
+            "_title": "Directories Flattened",
+            "Root Path": str(target),
+            "Files Moved": files_moved,
+            "Directories Removed": dirs_removed,
         }
     )
 

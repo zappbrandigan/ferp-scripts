@@ -7,31 +7,35 @@ from ferp.fscp.scripts import sdk
 
 
 def _collect_entries(target_dir: Path) -> list[Path]:
+    """Return all descendants to include in the backup zip."""
     entries: list[Path] = []
     for item in target_dir.rglob("*"):
         entries.append(item)
     return entries
 
 
-def _backup(target_dir: Path, api: sdk.ScriptAPI) -> None:
-    if not target_dir.exists() or not target_dir.is_dir():
-        raise ValueError(f"{target_dir} is not a directory")
+@sdk.script
+def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    """Create a .backup.zip alongside the target directory."""
+    target_dir = ctx.target_path
 
     backup_path = target_dir.parent / f"{target_dir.name}.backup.zip"
     if backup_path.exists():
         overwrite = api.confirm(
             f"'{backup_path.name}' already exists. Overwrite?",
-            default=False,
+            id="ferp_backup_dir",
         )
         if not overwrite:
             api.emit_result(
                 {
-                    "message": "Backup cancelled",
-                    "backup_path": str(backup_path),
+                    "_title": "Backup Canceled by User",
+                    "_status": "warn",
+                    "Info": "No file operations were performed.",
                 }
             )
             return
 
+    # Include directories to preserve empty folders in the archive.
     entries = _collect_entries(target_dir)
     total = len(entries) or 1
 
@@ -39,21 +43,15 @@ def _backup(target_dir: Path, api: sdk.ScriptAPI) -> None:
         for idx, item in enumerate(entries, start=1):
             arcname = item.relative_to(target_dir)
             zf.write(item, arcname=arcname)
-            if idx == 1 or idx == total or idx % 10 == 0:
-                api.progress(current=idx, total=total, unit="files")
+            api.progress(current=idx, total=total, unit="files", every=10)
 
     api.emit_result(
         {
-            "message": "Backup created",
-            "backup_path": str(backup_path),
-            "entries": total,
+            "_title": "Backup Created",
+            "Items Included": total,
+            "Backup Name": str(backup_path.name),
         }
     )
-
-
-@sdk.script
-def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    _backup(ctx.target_path, api)
 
 
 if __name__ == "__main__":

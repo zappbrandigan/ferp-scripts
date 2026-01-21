@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-import json
-import platform
 import re
 import shutil
 from pathlib import Path
+from typing import TypedDict
 
 from ferp.fscp.scripts import sdk
+
+
+class UserResponse(TypedDict):
+    value: str
+    autofitcolumn: bool
+    recursive: bool
+    test: bool
 
 
 def _start_excel():
@@ -154,6 +160,14 @@ def _is_in_named_dir(path: Path, dir_name: str) -> bool:
     return any(parent.name == dir_name for parent in path.parents)
 
 
+def _collect_excel_files(root: Path, recursive: bool) -> list[Path]:
+    if root.is_file():
+        return [root]
+    if recursive:
+        return sorted(path for path in root.rglob("*.xls*") if path.is_file())
+    return sorted(path for path in root.glob("*.xls*") if path.is_file())
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     confirm = api.confirm(
@@ -164,58 +178,60 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     if not confirm:
         api.emit_result(
             {
-                "message": "Script cancelled",
+                "_status": "warn",
+                "_title": "Moonbug Conversion Canceled by User",
+                "Info": "No file operations were performed.",
             }
         )
         return
 
-    response = api.request_input(
+    payload = api.request_input_json(
         "Options for Moonbug Excel to PDF script",
         id="moonbug_excel_to_pdf_options",
         fields=[
-            {"id": "test", "type": "bool", "label": "Test mode", "default": False},
+            {
+                "id": "recursive",
+                "type": "bool",
+                "label": "Scan subdirectories",
+                "default": False,
+            },
             {
                 "id": "autofitcolumn",
                 "type": "bool",
                 "label": "Autofit columns",
                 "default": True,
             },
+            {"id": "test", "type": "bool", "label": "Test mode", "default": False},
         ],
         show_text_input=False,
+        payload_type=UserResponse,
     )
-    if response is None:
-        api.exit(code=1)
-        return
-    try:
-        payload = json.loads(response)
-    except json.JSONDecodeError:
-        payload = {"value": response}
 
-    is_test = bool(payload.get("test", False))
-    autofit_column = bool(payload.get("autofitcolumn", True))
+    recursive = payload["recursive"]
+    autofit_column = payload["autofitcolumn"]
+    is_test = payload["test"]
 
     root_path = ctx.target_path
-    if not root_path.exists() or not root_path.is_dir():
-        raise ValueError(f"Target must be a directory. Received: {root_path}")
 
-    if platform.system().lower() != "windows":
+    if ctx.environment["host"]["platform"] != "win32":
         api.log(
             "warn",
             "Moonbug Excel conversion requires Windows (win32com). Running dry mode only.",
         )
         api.emit_result(
             {
-                "dry_run": True,
-                "target": str(root_path),
-                "test": is_test,
-                "autofitcolumn": autofit_column,
-                "files_found": len(sorted(root_path.rglob("*.xls*"))),
+                "_status": "warn",
+                "_title": "Dry Run Complete",
+                "Dry Run": True,
+                "Target": str(root_path),
+                "Is Test": is_test,
+                "Autofit Column": autofit_column,
+                "Files Found": len(sorted(root_path.rglob("*.xls*"))),
             }
         )
-        api.exit(code=0)
         return
 
-    xl_files = sorted(root_path.rglob("*.xls*"))
+    xl_files = _collect_excel_files(root_path, recursive=recursive)
     total_files = len(xl_files)
     if is_test:
         xl_files = xl_files[0:1]
@@ -231,6 +247,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     try:
         for index, file in enumerate(xl_files, start=1):
+            # conversion is slow, emit every iteration
             api.progress(current=index, total=total_files, unit="files")
             workbook = None
             destination = None
@@ -318,11 +335,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.emit_result(
         {
-            "dry_run": False,
-            "target": str(root_path),
-            "test": is_test,
-            "autofitcolumn": autofit_column,
-            "files_converted": total_files,
+            "_title": "Moonbug Conversion Complete",
+            "Location": str(root_path),
+            "Is Test": is_test,
+            "Autofit Column": autofit_column,
+            "Files Converted": total_files,
         }
     )
     api.exit(code=0)

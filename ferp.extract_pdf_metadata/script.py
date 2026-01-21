@@ -5,10 +5,17 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import TypedDict
 
 from PyPDF2 import PdfReader
 
 from ferp.fscp.scripts import sdk
+
+
+class UserResponse(TypedDict):
+    value: str
+    recursive: bool
+    write_csv: bool
 
 
 def _collect_pdfs(root: Path, recursive: bool) -> list[Path]:
@@ -81,23 +88,17 @@ def _write_csv(csv_path: Path, rows: list[dict[str, str]]) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
-            handle, fieldnames=["file", "relative_path", "tag", "value"]
+            handle, fieldnames=["File", "Relative Path", "Tag", "Value"]
         )
         writer.writeheader()
         writer.writerows(rows)
 
 
 def _format_results(results: list[dict[str, object]]) -> str:
-    MAX_DISPLAY = 25
     lines: list[str] = []
     for index, entry in enumerate(results):
-        if index >= MAX_DISPLAY:
-            lines.append(
-                f"(truncated to {MAX_DISPLAY} results; export CSV for full data)"
-            )
-            break
-        relative_path = str(entry.get("relative_path", ""))
-        metadata = entry.get("metadata")
+        relative_path = str(entry.get("Relative Path", ""))
+        metadata = entry.get("Metadata")
         lines.append(relative_path)
         if isinstance(metadata, dict) and metadata:
             for tag in sorted(metadata):
@@ -111,10 +112,8 @@ def _format_results(results: list[dict[str, object]]) -> str:
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     target_dir = ctx.target_path
-    if not target_dir.exists() or not target_dir.is_dir():
-        raise ValueError(f"Target '{target_dir}' is not a directory.")
 
-    response = api.request_input(
+    payload = api.request_input_json(
         "Metadata options",
         id="pdf_metadata_options",
         fields=[
@@ -132,19 +131,25 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             },
         ],
         show_text_input=False,
+        payload_type=UserResponse,
     )
 
-    payload: dict[str, object]
-    try:
-        payload = json.loads(response) if response else {}
-    except json.JSONDecodeError:
-        payload = {}
-
-    recursive = bool(payload.get("recursive", False))
-    write_csv = bool(payload.get("write_csv", False))
+    recursive = payload["recursive"]
+    write_csv = payload["write_csv"]
 
     pdf_files = _collect_pdfs(target_dir, recursive)
     total_files = len(pdf_files)
+    if not total_files:
+        api.log("warn", f"No PDF files found: {target_dir}")
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "No PDF Files Found",
+                "File Path": str(target_dir),
+            }
+        )
+        return
+
     api.log(
         "info",
         f"PDFs found={total_files} | recursive={recursive} | csv={write_csv}",
@@ -154,12 +159,19 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     results: list[dict[str, object]] = []
 
     for index, pdf_path in enumerate(pdf_files, start=1):
-        api.progress(current=index, total=total_files or 1, unit="files")
+        api.progress(current=index, total=total_files, unit="files", every=10)
         try:
             reader = PdfReader(str(pdf_path))
         except Exception as exc:  # noqa: BLE001
-            api.log("warn", f"Failed to read '{pdf_path}': {exc}")
-            continue
+            api.log(
+                "warn",
+                (f"Failed to read '{pdf_path}' in strict mode; retrying: {exc}"),
+            )
+            try:
+                reader = PdfReader(str(pdf_path), strict=False)
+            except Exception as exc:  # noqa: BLE001
+                api.log("warn", f"Failed to read '{pdf_path}': {exc}")
+                continue
 
         if reader.is_encrypted:
             api.log("warn", f"Skipped encrypted PDF: {pdf_path}")
@@ -181,9 +193,9 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
         results.append(
             {
-                "file": pdf_path.name,
-                "relative_path": relative_path,
-                "metadata": metadata,
+                "File": pdf_path.name,
+                "Relative Path": relative_path,
+                "Metadata": metadata,
             }
         )
 
@@ -191,19 +203,19 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             if not metadata:
                 rows.append(
                     {
-                        "file": pdf_path.name,
-                        "relative_path": relative_path,
-                        "tag": "",
-                        "value": "",
+                        "File": pdf_path.name,
+                        "Relative Path": relative_path,
+                        "Tag": "",
+                        "Value": "",
                     }
                 )
             for tag, value in sorted(metadata.items()):
                 rows.append(
                     {
-                        "file": pdf_path.name,
-                        "relative_path": relative_path,
-                        "tag": tag,
-                        "value": value,
+                        "File": pdf_path.name,
+                        "Relative Path": relative_path,
+                        "Tag": tag,
+                        "Value": value,
                     }
                 )
 
@@ -214,9 +226,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.emit_result(
         {
-            "files_found": total_files,
-            "csv_path": str(csv_path) if csv_path else None,
-            "results": _format_results(results),
+            "_title": "Metadata Extraction Finished",
+            "Files Found": total_files,
+            "CSV Location": str(csv_path) if csv_path else "Not exported.",
+            "Results": f"\n{_format_results(results)}",
         }
     )
 

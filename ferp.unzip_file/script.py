@@ -40,11 +40,11 @@ def _flatten_nested_root(root: Path) -> None:
     nested.rmdir()
 
 
-def _extract(zip_path: Path, api: sdk.ScriptAPI) -> None:
-    if not zip_path.exists() or zip_path.suffix.lower() not in {".zip", ".7z"}:
-        raise ValueError("Selected file is not a zip or 7z archive.")
+@sdk.script
+def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    target_path = ctx.target_path
 
-    output_dir = zip_path.parent / zip_path.stem
+    output_dir = target_path.parent / target_path.stem
     if output_dir.exists():
         overwrite = api.confirm(
             f"Directory '{output_dir.name}' exists. Overwrite?",
@@ -53,8 +53,9 @@ def _extract(zip_path: Path, api: sdk.ScriptAPI) -> None:
         if not overwrite:
             api.emit_result(
                 {
-                    "message": "Extraction cancelled",
-                    "output_dir": str(output_dir),
+                    "_status": "warn",
+                    "_title": "Extraction Canceled by User",
+                    "Info": "No file operations were performed.",
                 }
             )
             return
@@ -62,18 +63,17 @@ def _extract(zip_path: Path, api: sdk.ScriptAPI) -> None:
     extract_root = output_dir
     output_dir.mkdir(exist_ok=True)
 
-    if zip_path.suffix.lower() == ".zip":
-        with zipfile.ZipFile(zip_path, "r") as zf:
+    if target_path.suffix.lower() == ".zip":
+        with zipfile.ZipFile(target_path, "r") as zf:
             members = zf.infolist()
             root_name = _common_root([member.filename for member in members])
 
             total = len(members) or 1
             for idx, member in enumerate(members, start=1):
                 zf.extract(member, extract_root)
-                if idx == 1 or idx == total or idx % 25 == 0:
-                    api.progress(current=idx, total=total, unit="files")
+                api.progress(current=idx, total=total, unit="files", every=25)
     else:
-        with py7zr.SevenZipFile(zip_path, mode="r") as zf:
+        with py7zr.SevenZipFile(target_path, mode="r") as zf:
             names = zf.getnames()
             root_name = _common_root(names)
             total = len(names) or 1
@@ -86,16 +86,11 @@ def _extract(zip_path: Path, api: sdk.ScriptAPI) -> None:
 
     api.emit_result(
         {
-            "message": "Archive extracted",
-            "zip_path": str(zip_path),
-            "output_dir": str(output_dir),
+            "_title": "Archive Extracted",
+            "Target Path": str(target_path),
+            "Output Location": str(output_dir),
         }
     )
-
-
-@sdk.script
-def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    _extract(ctx.target_path, api)
 
 
 if __name__ == "__main__":

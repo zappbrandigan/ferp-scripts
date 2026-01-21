@@ -11,7 +11,7 @@ import warnings
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 
 import pdfplumber
 from pdfplumber.page import Page
@@ -35,6 +35,13 @@ logging.getLogger("PyPDF2").setLevel(logging.ERROR)
 
 LOGO_RE = re.compile(r"(?<![A-Z0-9])logos?(?![A-Z0-9])", re.IGNORECASE)
 _CONTEXT_EE_RE = re.compile(r"(?<![A-Z0-9])EE(?![A-Z0-9])")
+
+
+class UserResponse(TypedDict):
+    value: str
+    recursive: bool
+    in_place: bool
+    adjust_header: bool
 
 
 # =================================================
@@ -946,6 +953,44 @@ def set_xmp_metadata(input_pdf: Path, output_pdf: Path, xmp_bytes: bytes) -> Non
         writer.write(handle)
 
 
+def _copy_xmp_metadata(reader: PdfReader, writer: PdfWriter) -> None:
+    try:
+        root_obj = reader.trailer.get("/Root")
+        root_dict = root_obj.get_object() if root_obj else None
+        if not isinstance(root_dict, DictionaryObject):
+            return
+        metadata_obj = root_dict.get("/Metadata")
+        if not metadata_obj:
+            return
+        md_stream = metadata_obj.get_object()
+        get_data = getattr(md_stream, "get_data", None)
+        if callable(get_data):
+            data = get_data()
+        else:
+            data = getattr(md_stream, "_data", None)
+        if not data:
+            return
+        if not isinstance(data, (bytes, bytearray)):
+            return
+        new_stream = StreamObject()
+        set_data = getattr(new_stream, "set_data", None)
+        if callable(set_data):
+            set_data(data)
+        else:
+            new_stream._data = data
+            new_stream.update({NameObject("/Length"): NumberObject(len(data))})
+        new_stream.update(
+            {
+                NameObject("/Type"): NameObject("/Metadata"),
+                NameObject("/Subtype"): NameObject("/XML"),
+            }
+        )
+        md_ref = writer._add_object(new_stream)
+        writer._root_object.update({NameObject("/Metadata"): md_ref})
+    except Exception:  # noqa: BLE001
+        return
+
+
 def wrap_text(text: str, font_name: str, font_size: float, max_width: float):
     """
     Greedy word-wrap based on actual font metrics.
@@ -1501,17 +1546,7 @@ def add_stamp(
         if info:
             writer.add_metadata(info)
 
-    try:
-        root_obj = reader.trailer.get("/Root")
-        root_dict = root_obj.get_object() if root_obj else None
-        if isinstance(root_dict, DictionaryObject):
-            metadata_obj = root_dict.get("/Metadata")
-            if metadata_obj:
-                md_stream = metadata_obj.get_object()
-                md_ref = writer._add_object(md_stream)
-                writer._root_object.update({NameObject("/Metadata"): md_ref})
-    except Exception:  # noqa: BLE001
-        pass
+    _copy_xmp_metadata(reader, writer)
 
     output_path.parent.mkdir(exist_ok=True)
     with output_path.open("wb") as handle:
@@ -1620,15 +1655,7 @@ def make_top_space_first_page_inplace(
             writer.add_metadata(md)
 
     # ---- Best-effort XMP metadata preservation ----
-    try:
-        root_obj = reader.trailer.get("/Root")
-        root_dict = root_obj.get_object() if root_obj else None
-        if isinstance(root_dict, DictionaryObject):
-            xmp = root_dict.get("/Metadata")
-            if xmp is not None:
-                writer._root_object[NameObject("/Metadata")] = xmp
-    except Exception:
-        pass
+    _copy_xmp_metadata(reader, writer)
 
     # ---- Safe in-place overwrite ----
     dir_name = os.path.dirname(pdf_path)
@@ -1693,7 +1720,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     with cache_path.open("r", encoding="utf-8") as handle:
         pubs = json.load(handle)
 
-    response = api.request_input(
+    payload = api.request_input_json(
         "Publisher catalog code (e.g., 'uvs', 'amz', etc.)",
         id="ferp_process_cue_sheets_cat_code",
         fields=[
@@ -1716,16 +1743,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "default": False,
             },
         ],
+        payload_type=UserResponse,
     )
-    payload: dict[str, object]
-    try:
-        payload = json.loads(response) if response else {}
-    except json.JSONDecodeError:
-        payload = {}
-
-    recursive = bool(payload.get("recursive", False))
-    in_place = bool(payload.get("in_place", False))
-    adjust_header = bool(payload.get("adjust_header", False))
+    recursive = payload["recursive"]
+    in_place = payload["in_place"]
+    adjust_header = payload["adjust_header"]
     header_top_space = 50.0
     if adjust_header:
         header_response = api.request_input(
@@ -1737,13 +1759,34 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         if header_response:
             try:
                 header_top_space = float(header_response)
-            except ValueError as exc:
-                raise ValueError("Top space must be a number.") from exc
+            except ValueError:
+                api.emit_result(
+                    {
+                        "_status": "error",
+                        "_title": "Error: Invalid Input",
+                        "Info": "Top space must be a number.",
+                    }
+                )
+                return
         if header_top_space <= 0 or header_top_space > 200:
-            raise ValueError("Top space must be between 0 and 200.")
-    cat_code = str(payload.get("value", "")).lower().strip()
+            api.emit_result(
+                {
+                    "_status": "error",
+                    "_title": "Error: Invalid Input",
+                    "Info": "Top space must be greater than 0 and less than or equal to 200.",
+                }
+            )
+            return
+    cat_code = payload["value"].lower()
     if cat_code not in pubs.keys():
-        raise ValueError(f"Unknown category code '{cat_code}'")
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Warning: Invalid Catalog",
+                "Info": f"The code {cat_code} does not exist.",
+            }
+        )
+        return
 
     cat_object: List[dict] = pubs[cat_code]
     con_pubs: List[str] = [entry["publisher"] for entry in cat_object]
@@ -1758,7 +1801,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     )
 
     for index, pdf_path in enumerate(pdf_files, start=1):
-        api.progress(current=index, total=total_files or 1, unit="files")
+        api.progress(current=index, total=total_files, unit="files")
         fmt = detect_format(pdf_path)
         if fmt == "soundmouse":
             api.log("debug", f"{pdf_path.name}: detected Soundmouse format")
@@ -1835,14 +1878,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             "info",
             f"Processed '{pdf_path.relative_to(target_dir)}' | format={fmt} | total_cues={len(raw_cues)} | filtered_cues={len(filtered_cues)} | matched_controlled_publishers={', '.join(matched_publishers)} | accuracy_audits={str(accuracy_audits)}",
         )
-        # debugging/audit:
-        # pprint(result["evidence_by_controlled"])
-        # pprint(result["unmatched_controlled_publishers"])
+
     api.emit_result(
         {
-            "created_directories": ", ".join(sorted(created_dirs)),
-            "total_files": total_files,
-            "category_code": cat_code,
+            "_title": "Cue Sheet Processing Finished",
+            "Created Directories": ", ".join(sorted(created_dirs)),
+            "Total Files": total_files,
+            "Category Code": cat_code,
         }
     )
 

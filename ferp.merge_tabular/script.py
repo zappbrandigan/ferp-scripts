@@ -70,8 +70,6 @@ def _next_output_path(root: Path, header: tuple[str, ...]) -> Path:
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     root = ctx.target_path
-    if not root.exists() or not root.is_dir():
-        raise ValueError(f"Target must be a directory: {root}")
 
     header_groups: dict[tuple[str, ...], list[Path]] = defaultdict(list)
     skipped: list[dict[str, str]] = []
@@ -87,7 +85,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 raise ValueError("Missing header row")
             header_groups[header].append(entry)
         except Exception as exc:  # noqa: BLE001
-            skipped.append({"file": str(entry), "reason": str(exc)})
+            skipped.append({"File": str(entry), "Reason": str(exc)})
             api.log("warn", f"Skipping {entry.name}: {exc}")
 
     merged_outputs: list[dict[str, object]] = []
@@ -108,13 +106,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         for row in _iter_rows(path):
                             writer.writerow(row)
                     except Exception as exc:  # noqa: BLE001
-                        skipped.append({"file": str(path), "reason": str(exc)})
+                        skipped.append({"File": str(path), "Reason": str(exc)})
                         api.log("warn", f"Failed while reading {path.name}: {exc}")
             merged_outputs.append(
                 {
-                    "schema": list(header),
-                    "output": str(output_path),
-                    "sources": [str(p) for p in files],
+                    "Schema": list(header),
+                    "Output": str(output_path),
+                    "Sources": [str(p) for p in files],
                 }
             )
             api.log(
@@ -122,16 +120,16 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 f"Merged {len(files)} file(s) with schema {', '.join(header)} into {output_path.name}",
             )
         except Exception as exc:  # noqa: BLE001
-            skipped.append({"file": str(output_path), "reason": f"write failed: {exc}"})
+            skipped.append({"File": str(output_path), "Reason": f"write failed: {exc}"})
             api.log("error", f"Unable to write {output_path.name}: {exc}")
             if output_path.exists():
                 output_path.unlink(missing_ok=True)
 
     api.emit_result(
         {
-            "merged": merged_outputs,
-            "skipped": skipped,
-            "unmatched": unmatched,
+            "Merged Files": merged_outputs,
+            "Skipped Files": skipped,
+            "Unmatched Files": unmatched,
         }
     )
     api.exit(code=0)

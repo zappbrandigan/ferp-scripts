@@ -32,7 +32,7 @@
     },
     {
       "id": "ferp.backup_dir",
-      "name": "Archive: Backup",
+      "name": "Archive: Create Backup",
       "version": "1.0.0",
       "script": "scripts/ferp.backup_dir/script.py",
       "target": "highlighted_directory"
@@ -96,7 +96,7 @@
     },
     {
       "id": "ferp.normalize_pdf_names",
-      "name": "Normalize: Cue Sheets File Names",
+      "name": "Normalize: Cue Sheet Names",
       "version": "1.0.0",
       "script": "scripts/ferp.normalize_pdf_names/script.py",
       "dependencies": [
@@ -151,7 +151,7 @@
     },
     {
       "id": "ferp.excel_diff",
-      "name": "Compare: Excel Diff",
+      "name": "Diff: Excel",
       "version": "1.0.0",
       "script": "scripts/ferp.excel_diff/script.py",
       "dependencies": [
@@ -161,7 +161,7 @@
     },
     {
       "id": "ferp.pdf_text_diff",
-      "name": "Compare: PDF Text Diff",
+      "name": "Diff: PDF",
       "version": "1.0.0",
       "script": "scripts/ferp.pdf_text_diff/script.py",
       "dependencies": [

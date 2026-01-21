@@ -3,11 +3,10 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import string
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Callable, Coroutine, Iterable, Literal, TypeVar
+from typing import Callable, Coroutine, Iterable, Literal, TypedDict, TypeVar
 
 try:
     from googletrans import Translator as _GoogleTranslator
@@ -28,8 +27,6 @@ EPISODE_DELIM = "  "
 ELLIPSIS = ". . ."
 ELLIPSIS_LEN = len(ELLIPSIS)
 SPACE_RUN_RE = re.compile(r"( {2,})")
-PROGRESS_EVERY_MAX = 50
-PROGRESS_TARGET_UPDATES = 30
 T = TypeVar("T")
 _ASCII_PUNCT_TRANSLATION = str.maketrans(
     {
@@ -51,6 +48,11 @@ _ARTICLE_MATCH_TRANSLATION = str.maketrans(
 )
 
 
+class UserResponse(TypedDict):
+    value: str
+    recursive: bool
+
+
 @dataclass
 class ParsedName:
     production: str
@@ -67,20 +69,28 @@ class FileOutcome:
     reason: str | None = None
 
 
-def _iter_directory(root: Path) -> Iterable[os.DirEntry[str]]:
-    with os.scandir(root) as entries:
-        for entry in entries:
-            if entry.name.startswith("."):
-                continue
-            try:
-                is_file = entry.is_file(follow_symlinks=False)
-                is_link = entry.is_symlink()
-            except OSError:
-                continue
-            if not (is_file or is_link):
-                continue
-            if entry.name.lower().endswith(".pdf"):
-                yield entry
+def _iter_directory(root: Path, *, recursive: bool) -> Iterable[os.DirEntry[str]]:
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        with os.scandir(current) as entries:
+            for entry in entries:
+                if entry.name.startswith(".") or entry.name == "_check":
+                    continue
+                try:
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                    is_file = entry.is_file(follow_symlinks=False)
+                    is_link = entry.is_symlink()
+                except OSError:
+                    continue
+                if is_dir:
+                    if recursive:
+                        stack.append(Path(entry.path))
+                    continue
+                if not (is_file or is_link):
+                    continue
+                if entry.name.lower().endswith(".pdf"):
+                    yield entry
 
 
 def _parse_name(raw: str) -> tuple[ParsedName | None, str | None]:
@@ -141,7 +151,7 @@ def _normalize_name(parsed: ParsedName) -> tuple[str | None, str | None]:
         episode_title = _normalize_ascii(episode_title)
         if not episode_title:
             return None, "unrepairable_structure"
-        episode_title = string.capwords(episode_title, sep=" ")
+        episode_title = _title_case(episode_title)
 
         episode_info = _normalize_ellipsis((parsed.episode_info or "").strip())
         if not episode_info:
@@ -204,6 +214,15 @@ def _normalize_episode_token(value: str) -> str:
 def _normalize_ascii(value: str) -> str:
     translated = value.translate(_ASCII_PUNCT_TRANSLATION)
     return unidecode(translated)
+
+
+def _title_case(value: str) -> str:
+    lowered = value.lower()
+    return re.sub(
+        r"(^|[\s\-(/\\[])([A-Za-z])",
+        lambda m: f"{m.group(1)}{m.group(2).upper()}",
+        lowered,
+    )
 
 
 def _format_name(parts: ParsedName) -> str:
@@ -529,7 +548,7 @@ def _build_summary(outcomes: list[FileOutcome]) -> str:
         [
             f"\nValid: {len(valid)}",
             f"Renamed: {len(renamed)}",
-            f"Moved: {len(moved)}",
+            f"_check/: {len(moved)}",
         ]
     )
 
@@ -543,36 +562,51 @@ def _rel(root: Path, path: Path | None) -> str:
         return str(path)
 
 
-def _progress_every(total_entries: int) -> int:
-    if total_entries <= 1:
-        return 1
-    return max(1, min(PROGRESS_EVERY_MAX, total_entries // PROGRESS_TARGET_UPDATES))
-
-
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     root = ctx.target_path
-    if not root.exists() or not root.is_dir():
-        raise ValueError("Select a directory before running this script.")
 
+    payload = api.request_input_json(
+        "This action will rename one or more files. Review your options and confirm to proceed.",
+        id="ferp_normalize_pdf_names",
+        fields=[
+            {
+                "id": "recursive",
+                "type": "bool",
+                "label": "Scan subdirectories",
+                "default": False,
+            }
+        ],
+        show_text_input=False,
+        payload_type=UserResponse,
+    )
+
+    recursive = payload["recursive"]
     outcomes: list[FileOutcome] = []
-    check_dir = root / "_check"
 
     try:
-        entries = list(_iter_directory(root))
+        entries = list(_iter_directory(root, recursive=recursive))
     except PermissionError:
-        raise ValueError("Permission denied while listing directory.")
+        api.emit_result(
+            {
+                "_status": "error",
+                "_title": "Error: Script Closed",
+                "Info": "Permission denied while listing directory.",
+            }
+        )
+        return
 
     total_entries = len(entries) or 1
-    progress_every = _progress_every(total_entries)
 
     for index, entry in enumerate(entries, start=1):
         path = Path(entry.path)
+        check_dir = path.parent / "_check" if recursive else root / "_check"
 
-        if total_entries > 1 and (
-            index == total_entries or index % progress_every == 0
-        ):
-            api.progress(current=index, total=total_entries, unit="files")
+        api.progress(
+            current=index,
+            total=total_entries,
+            unit="files",
+        )
 
         if entry.is_symlink() and not path.exists():
             outcome = _record_move(outcomes, path, path, check_dir, "broken_symlink")
@@ -716,8 +750,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     summary = _build_summary(outcomes)
     if _GOOGLETRANS_IMPORT_ERROR:
         api.log("warn", "googletrans not available; article repositioning skipped.")
-    api.emit_result({"report": summary})
-    api.exit(code=0)
+    api.emit_result({"_title": "Filename Normalization Finished", "Report": summary})
 
 
 if __name__ == "__main__":

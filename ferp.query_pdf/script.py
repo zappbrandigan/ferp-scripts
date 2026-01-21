@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import csv
-import json
 import re
 from pathlib import Path
+from typing import TypedDict
 
 from PyPDF2 import PdfReader
 
 from ferp.fscp.scripts import sdk
+
+
+class QueryOptions(TypedDict):
+    value: str
+    regex: bool
+    case_sensitive: bool
 
 
 def _compile_pattern(
@@ -98,7 +104,7 @@ def _write_csv(csv_path: Path, rows: list[dict[str, object]]) -> None:
 
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    response = api.request_input(
+    payload = api.request_input_json(
         "Enter search query",
         id="query_pdf_options",
         fields=[
@@ -110,37 +116,52 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "default": False,
             },
         ],
+        payload_type=QueryOptions,
     )
-    try:
-        payload = json.loads(response)
-    except json.JSONDecodeError:
-        payload = {"value": response}
 
-    query = str(payload.get("value", "")).strip()
-    regex = bool(payload.get("regex", False))
-    case_sensitive = bool(payload.get("case_sensitive", False))
+    query = payload["value"]
+    regex = payload["regex"]
+    case_sensitive = payload["case_sensitive"]
 
     if not query:
-        raise ValueError("Search query is required.")
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Warning",
+                "Info": "Search query is required. Query not performed.",
+            }
+        )
+        return
 
     context_chars = 80
     context_response = api.request_input(
         "Context characters around each match",
         default=str(context_chars),
         id="query_pdf_context",
-    ).strip()
+    )
     if context_response:
         try:
             context_chars = int(context_response)
-        except ValueError as exc:
-            raise ValueError("Context characters must be a number.") from exc
+        except ValueError:
+            api.emit_result(
+                {
+                    "_status": "warn",
+                    "_title": "Warning",
+                    "Info": "Context characters must be a number.",
+                }
+            )
+            return
         if context_chars <= 0:
-            raise ValueError("Context characters must be greater than zero.")
+            api.emit_result(
+                {
+                    "_status": "warn",
+                    "_title": "Warning",
+                    "Info": "Context characters must be greater than zero.",
+                }
+            )
+            return
 
     root_path = ctx.target_path
-    if not root_path.exists() or not root_path.is_dir():
-        raise ValueError(f"Target '{root_path}' is not a directory.")
-
     pdf_files = sorted(root_path.rglob("*.pdf"))
     total_files = len(pdf_files)
     api.log(
@@ -184,9 +205,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.emit_result(
         {
-            "files_searched": total_files,
-            "files_with_matches": len(files_with_matches),
-            "csv_path": str(csv_path) if csv_path else None,
+            "_title": "PDF Query Results",
+            "Query": query,
+            "Files Searched": total_files,
+            "Files With Matches": len(files_with_matches),
+            "CSV Path": str(csv_path) if csv_path else None,
         }
     )
     api.exit(code=0)

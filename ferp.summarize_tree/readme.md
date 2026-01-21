@@ -15,7 +15,8 @@ the selected folder.
 
 1. Highlight the directory you want to analyze in FERP.
 2. Run `Summarize Directory Tree` from the Scripts panel.
-3. Review the output panel for per-directory totals and extension breakdowns.
+3. Confirm whether you'd like to export a Markdown summary.
+4. Review the output panel for per-directory totals and extension breakdowns.
 
 ## Behavior
 
@@ -26,5 +27,5 @@ the selected folder.
 
 ## Notes
 
-- The script is non-interactive and produces informational output only.
+- The script can optionally export a Markdown summary next to the target folder.
 - Large trees will take slightly longer but remain bounded by the depth limit.

@@ -46,7 +46,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     if not pdf_files:
         api.log("info", "No PDF files found to rename.")
-        api.emit_result({"renamed": 0})
+        api.emit_result({"Renamed": 0})
         return
 
     renamed = 0
@@ -68,7 +68,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
         api.progress(current=index, total=len(pdf_files), unit="files")
 
-    api.emit_result({"renamed": renamed, "total": len(pdf_files)})
+    api.emit_result({"Renamed": renamed, "Total Files": len(pdf_files)})
 
 
 if __name__ == "__main__":

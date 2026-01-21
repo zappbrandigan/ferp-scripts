@@ -35,10 +35,6 @@ def _extract_from_msg(msg_file: Path, output_dir: Path) -> int:
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     zip_path = ctx.target_path
-    if not zip_path.exists():
-        raise FileNotFoundError(zip_path)
-    if zip_path.suffix.lower() != ".zip":
-        raise ValueError(f"Target must be a .zip archive, received: {zip_path.name}")
 
     output_dir = zip_path.parent / f"{zip_path.stem}_attachments"
     temp_dir = output_dir / "_unzipped"
@@ -59,18 +55,18 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             shutil.rmtree(output_dir, ignore_errors=True)
         api.emit_result(
             {
-                "message": "No .msg files found",
-                "output": None,
-                "processed_messages": 0,
+                "_status": "warn",
+                "_title": "Warning: No .msg Files Found",
+                "Output": None,
+                "Processed Messages": 0,
             }
         )
-        api.exit(code=0)
         return
 
     total_saved = 0
 
     for index, msg_file in enumerate(msg_files, start=1):
-        api.progress(current=index, total=len(msg_files), unit="messages")
+        api.progress(current=index, total=len(msg_files), unit="messages", every=10)
         saved = _extract_from_msg(msg_file, output_dir)
         total_saved += saved
         api.log("info", f"{msg_file.name}: saved {saved} attachment(s)")
@@ -79,12 +75,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.emit_result(
         {
-            "output_directory": str(output_dir),
-            "messages_processed": len(msg_files),
-            "attachments_extracted": total_saved,
+            "_title": "Attachment Extraction Finished",
+            "Output Directory": str(output_dir),
+            "Messages Processed": len(msg_files),
+            "Attachments Extracted": total_saved,
         }
     )
-    api.exit(code=0)
 
 
 if __name__ == "__main__":

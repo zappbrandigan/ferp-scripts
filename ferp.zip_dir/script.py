@@ -22,9 +22,6 @@ def _collect_entries(target_dir: Path, zip_path: Path) -> list[Path]:
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     target_dir = ctx.target_path
 
-    if not target_dir.exists() or not target_dir.is_dir():
-        raise ValueError(f"{target_dir} is not a directory")
-
     zip_path = target_dir.parent / f"{target_dir.name}.zip"
     if zip_path.exists():
         overwrite = api.confirm(
@@ -34,8 +31,9 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         if not overwrite:
             api.emit_result(
                 {
-                    "message": "Zip creation cancelled",
-                    "zip_path": str(zip_path),
+                    "_status": "warn",
+                    "_title": "Zip Creation Canceled by User",
+                    "Info": "No file operations were performed.",
                 }
             )
             return
@@ -47,14 +45,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         for idx, item in enumerate(entries, start=1):
             arcname = item.relative_to(target_dir)
             zf.write(item, arcname=arcname)
-            if idx == 1 or idx == total or idx % 10 == 0:
-                api.progress(current=idx, total=total, unit="files")
+            api.progress(current=idx, total=total, unit="files", every=10)
 
     api.emit_result(
         {
-            "message": "Created zip archive",
-            "zip_path": str(zip_path),
-            "entries": total,
+            "_title": "Zip Archive Created",
+            "Zip Location": str(zip_path),
+            "Entries": total,
         }
     )
 
