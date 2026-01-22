@@ -31,6 +31,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     total = max(len(entries), 1)
 
     for idx, entry in enumerate(entries, start=1):
+        api.check_cancel()
         if entry.is_file():
             destination = target / entry.name
             counter = 1
@@ -57,6 +58,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     # Clean up any empty directories left after moving files.
     for dir_path in sorted(target.rglob("*"), reverse=True):
+        api.check_cancel()
         if dir_path.is_dir():
             try:
                 dir_path.rmdir()

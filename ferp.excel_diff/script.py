@@ -21,6 +21,8 @@ def _norm(v: object) -> object:
 
 def _sheet_cells(
     ws_values, ws_source, stats: dict[str, int] | None = None
+    ,
+    check_cancel: Callable[[], None] | None = None,
 ) -> dict[tuple[int, int], object]:
     """
     Return dict mapping (row, col) -> normalized value
@@ -68,7 +70,11 @@ def _sheet_cells(
     for row_source in ws_source.iter_rows(
         min_row=1, max_row=max_row, min_col=1, max_col=max_col
     ):
+        if check_cancel is not None:
+            check_cancel()
         for cell_source in row_source:
+            if check_cancel is not None:
+                check_cancel()
             cell_values = ws_values.cell(row=cell_source.row, column=cell_source.column)
             value = cell_values.value
             used_source = value is None and cell_source.value is not None
@@ -95,6 +101,7 @@ def compare_excel(
     b_path: Path,
     sheets: list[str] | None = None,
     log: Callable[[str], None] | None = None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> tuple[list[tuple[str, int, int, object, object]], list[str], bool]:
     wb_a_values = load_workbook(a_path, data_only=True)
     wb_b_values = load_workbook(b_path, data_only=True)
@@ -133,6 +140,8 @@ def compare_excel(
         diffs: list[tuple[str, int, int, object, object]] = []
 
         for a_name, b_name, label in pairs:
+            if check_cancel is not None:
+                check_cancel()
             if (
                 a_name not in wb_a_values.sheetnames
                 or b_name not in wb_b_values.sheetnames
@@ -147,8 +156,12 @@ def compare_excel(
 
             a_stats: dict[str, int] = {}
             b_stats: dict[str, int] = {}
-            a = _sheet_cells(ws_a_values, ws_a_source, stats=a_stats)
-            b = _sheet_cells(ws_b_values, ws_b_source, stats=b_stats)
+            a = _sheet_cells(
+                ws_a_values, ws_a_source, stats=a_stats, check_cancel=check_cancel
+            )
+            b = _sheet_cells(
+                ws_b_values, ws_b_source, stats=b_stats, check_cancel=check_cancel
+            )
             if log is not None:
                 log(f"Sheet stats | {label} | a={a_stats} b={b_stats}")
 
@@ -158,6 +171,8 @@ def compare_excel(
 
             diffs_before = len(diffs)
             for r, c in coords:
+                if check_cancel is not None:
+                    check_cancel()
                 va = a.get((r, c), "")
                 vb = b.get((r, c), "")
                 if va != vb:
@@ -232,11 +247,17 @@ def _format_diffs(diffs: list[tuple[str, int, int, object, object]]) -> str:
     return "\n".join(lines).rstrip()
 
 
-def _sample_cells(path: Path, max_cells: int = 5) -> list[tuple[str, str, object]]:
+def _sample_cells(
+    path: Path,
+    max_cells: int = 5,
+    check_cancel: Callable[[], None] | None = None,
+) -> list[tuple[str, str, object]]:
     wb = load_workbook(path, data_only=True)
     samples: list[tuple[str, str, object]] = []
     try:
         for sheet_name in wb.sheetnames:
+            if check_cancel is not None:
+                check_cancel()
             ws = wb[sheet_name]
             max_row = ws.max_row or 0
             max_col = ws.max_column or 0
@@ -245,7 +266,11 @@ def _sample_cells(path: Path, max_cells: int = 5) -> list[tuple[str, str, object
             for row in ws.iter_rows(
                 min_row=1, max_row=max_row, min_col=1, max_col=max_col
             ):
+                if check_cancel is not None:
+                    check_cancel()
                 for cell in row:
+                    if check_cancel is not None:
+                        check_cancel()
                     if cell.column is None:
                         continue
                     value = cell.value
@@ -336,19 +361,25 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     sheets = [s.strip() for s in sheets_raw.split(",") if s.strip()] or None
 
     for label, path in (("file_a", a_path), ("file_b", b_path)):
-        samples = _sample_cells(path)
+        api.check_cancel()
+        samples = _sample_cells(path, check_cancel=api.check_cancel)
         if samples:
             api.log("info", f"{label} sample cells: {samples}")
         else:
             api.log("warn", f"{label} has no non-empty cells detected")
 
+    api.check_cancel()
     api.log(
         "info",
         f"Comparing '{a_path.name}' vs '{b_path.name}' | sheets={sheets or 'auto'}",
     )
 
     diffs, missing, compared_by_index = compare_excel(
-        a_path, b_path, sheets=sheets, log=lambda msg: api.log("debug", msg)
+        a_path,
+        b_path,
+        sheets=sheets,
+        log=lambda msg: api.log("debug", msg),
+        check_cancel=api.check_cancel,
     )
 
     xlsx_path: Path | None = None

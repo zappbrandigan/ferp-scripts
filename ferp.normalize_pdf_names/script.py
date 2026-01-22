@@ -80,12 +80,21 @@ class FileOutcome:
     reason: str | None = None
 
 
-def _iter_directory(root: Path, *, recursive: bool) -> Iterable[os.DirEntry[str]]:
+def _iter_directory(
+    root: Path,
+    *,
+    recursive: bool,
+    check_cancel: Callable[[], None] | None = None,
+) -> Iterable[os.DirEntry[str]]:
     stack = [root]
     while stack:
+        if check_cancel is not None:
+            check_cancel()
         current = stack.pop()
         with os.scandir(current) as entries:
             for entry in entries:
+                if check_cancel is not None:
+                    check_cancel()
                 if entry.name.startswith(".") or entry.name == "_check":
                     continue
                 try:
@@ -611,7 +620,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     outcomes: list[FileOutcome] = []
 
     try:
-        entries = list(_iter_directory(root, recursive=recursive))
+        api.check_cancel()
+        entries = list(
+            _iter_directory(root, recursive=recursive, check_cancel=api.check_cancel)
+        )
     except PermissionError:
         api.emit_result(
             {
@@ -625,6 +637,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     total_entries = len(entries) or 1
 
     for index, entry in enumerate(entries, start=1):
+        api.check_cancel()
         path = Path(entry.path)
         check_dir = path.parent / "_check" if recursive else root / "_check"
 

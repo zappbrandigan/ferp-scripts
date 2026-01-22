@@ -41,6 +41,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     with zipfile.ZipFile(backup_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for idx, item in enumerate(entries, start=1):
+            api.check_cancel()
             arcname = item.relative_to(target_dir)
             zf.write(item, arcname=arcname)
             api.progress(current=idx, total=total, unit="files", every=10)

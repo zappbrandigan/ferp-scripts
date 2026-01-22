@@ -15,7 +15,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 
 import pdfplumber
 from pdfplumber.page import Page
-from platformdirs import user_cache_dir
 from PyPDF2 import PdfReader, PdfWriter, Transformation
 from PyPDF2._page import PageObject
 from PyPDF2.errors import PdfReadWarning
@@ -130,7 +129,9 @@ def sm_find_table_start_y(rows) -> Optional[float]:
     return None
 
 
-def parse_soundmouse(pdf_path: Path) -> list[Dict[str, Any]]:
+def parse_soundmouse(
+    pdf_path: Path, check_cancel: Callable[[], None] | None = None
+) -> list[Dict[str, Any]]:
     """
     Parse Soundmouse cue sheets into a list of cue dictionaries.
 
@@ -175,6 +176,8 @@ def parse_soundmouse(pdf_path: Path) -> list[Dict[str, Any]]:
 
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
+            if check_cancel is not None:
+                check_cancel()
             words = sm_extract_words(page)
             if not words:
                 continue
@@ -189,6 +192,8 @@ def parse_soundmouse(pdf_path: Path) -> list[Dict[str, Any]]:
             table_rows = sm_cluster_rows(table_words)
 
             for row in table_rows:
+                if check_cancel is not None:
+                    check_cancel()
                 record = {name: [] for name, *_ in SOUNDMOUSE_COLUMNS}
                 for w in row:
                     col = sm_assign_column(w["x0"])
@@ -357,12 +362,18 @@ def is_rapidcue_clutter(line: str) -> bool:
     return False
 
 
-def rc_extract_lines(pdf_path: Path) -> List[str]:
+def rc_extract_lines(
+    pdf_path: Path, check_cancel: Callable[[], None] | None = None
+) -> List[str]:
     lines: List[str] = []
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
+            if check_cancel is not None:
+                check_cancel()
             text = page.extract_text() or ""
             for line in text.splitlines():
+                if check_cancel is not None:
+                    check_cancel()
                 line = line.strip()
                 if not line:
                     continue
@@ -390,8 +401,10 @@ def rc_peel_descriptor_prefix(line: str) -> Tuple[Optional[str], str]:
     return None, stripped
 
 
-def parse_rapidcue(pdf_path: Path) -> list[Dict[str, Any]]:
-    lines = rc_extract_lines(pdf_path)
+def parse_rapidcue(
+    pdf_path: Path, check_cancel: Callable[[], None] | None = None
+) -> list[Dict[str, Any]]:
+    lines = rc_extract_lines(pdf_path, check_cancel=check_cancel)
     cues: List[Dict[str, Any]] = []
 
     current_cue: Optional[Dict[str, Any]] = None
@@ -431,6 +444,8 @@ def parse_rapidcue(pdf_path: Path) -> list[Dict[str, Any]]:
         role_buffer = []
 
     for line in lines:
+        if check_cancel is not None:
+            check_cancel()
         # Cue header
         m = RC_CUE_HEADER_RE.match(line)
         if m:
@@ -483,13 +498,19 @@ def parse_rapidcue(pdf_path: Path) -> list[Dict[str, Any]]:
 # Default parser (unknown format)
 # =================================================
 def default_extract_lines(
-    pdf_path: Path, log_fn: Optional[Callable[[str], None]] = None
+    pdf_path: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> List[str]:
     lines: List[str] = []
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
+            if check_cancel is not None:
+                check_cancel()
             text = page.extract_text() or ""
             for line in text.splitlines():
+                if check_cancel is not None:
+                    check_cancel()
                 line = line.strip()
                 if not line:
                     continue
@@ -505,6 +526,7 @@ def parse_default(
     pdf_path: Path,
     controlled_publishers: list[str],
     log_fn: Optional[Callable[[str], None]] = None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> list[Dict[str, Any]]:
     cues: List[Dict[str, Any]] = []
     controlled_norm = [
@@ -513,7 +535,11 @@ def parse_default(
     ]
     skipped_context = 0
     matched_lines = 0
-    for line in default_extract_lines(pdf_path, log_fn=log_fn):
+    for line in default_extract_lines(
+        pdf_path, log_fn=log_fn, check_cancel=check_cancel
+    ):
+        if check_cancel is not None:
+            check_cancel()
         if _CONTEXT_EE_RE.search(line.upper()) or LOGO_RE.search(line):
             skipped_context += 1
             continue
@@ -858,10 +884,23 @@ def find_controlled_publishers_present(
     }
 
 
-def collect_pdfs(root: Path, recursive: bool) -> list[Path]:
+def collect_pdfs(
+    root: Path, recursive: bool, check_cancel: Callable[[], None] | None = None
+) -> list[Path]:
     if recursive:
-        return sorted(root.rglob("*.pdf"))
-    return sorted(path for path in root.glob("*.pdf") if path.is_file())
+        files = []
+        for path in root.rglob("*.pdf"):
+            if check_cancel is not None:
+                check_cancel()
+            files.append(path)
+        return sorted(files)
+    files = []
+    for path in root.glob("*.pdf"):
+        if check_cancel is not None:
+            check_cancel()
+        if path.is_file():
+            files.append(path)
+    return sorted(files)
 
 
 def escape_xml(s: str) -> str:
@@ -898,11 +937,18 @@ def build_xmp_publishers(publishers: list[str]) -> bytes:
     return xmp.encode("utf-8")
 
 
-def set_xmp_metadata(input_pdf: Path, output_pdf: Path, xmp_bytes: bytes) -> None:
+def set_xmp_metadata(
+    input_pdf: Path,
+    output_pdf: Path,
+    xmp_bytes: bytes,
+    check_cancel: Callable[[], None] | None = None,
+) -> None:
     reader = PdfReader(str(input_pdf))
     writer = PdfWriter()
 
     for page in reader.pages:
+        if check_cancel is not None:
+            check_cancel()
         writer.add_page(page)
 
     info: dict[str, str] = {}
@@ -1708,7 +1754,8 @@ def resolve_multi_territory_rows(
 
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    cache_dir = Path(user_cache_dir("ferp"))
+    env_paths = ctx.environment.get("paths", {})
+    cache_dir = Path(env_paths.get("cache_dir"))
     cache_path = cache_dir / "publishers_cache.json"
     if not cache_path.exists():
         raise FileNotFoundError(f"Cache file '{cache_path}' not found")
@@ -1791,8 +1838,22 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     cat_object: List[dict] = pubs[cat_code]
     con_pubs: List[str] = [entry["publisher"] for entry in cat_object]
     raw_cues = []
+    temp_paths: list[Path] = []
 
-    pdf_files = collect_pdfs(target_dir, recursive=recursive)
+    def _cleanup() -> None:
+        for path in temp_paths:
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError:
+                pass
+
+    api.register_cleanup(_cleanup)
+
+    api.check_cancel()
+    pdf_files = collect_pdfs(
+        target_dir, recursive=recursive, check_cancel=api.check_cancel
+    )
     total_files = len(pdf_files)
     created_dirs: set[str] = set()
     api.log(
@@ -1801,22 +1862,25 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     )
 
     for index, pdf_path in enumerate(pdf_files, start=1):
+        api.check_cancel()
         api.progress(current=index, total=total_files, unit="files")
         fmt = detect_format(pdf_path)
         if fmt == "soundmouse":
             api.log("debug", f"{pdf_path.name}: detected Soundmouse format")
-            raw_cues = parse_soundmouse(pdf_path)
+            raw_cues = parse_soundmouse(pdf_path, check_cancel=api.check_cancel)
         elif fmt == "rapidcue":
             api.log("debug", f"{pdf_path.name}: detected RapidCue format")
-            raw_cues = parse_rapidcue(pdf_path)
+            raw_cues = parse_rapidcue(pdf_path, check_cancel=api.check_cancel)
         else:
             api.log("debug", f"{pdf_path.name}: unknown format; using default parser")
             raw_cues = parse_default(
                 pdf_path,
                 con_pubs,
                 log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
+                check_cancel=api.check_cancel,
             )
 
+        api.check_cancel()
         filtered_cues = filter_logos(raw_cues)
         result = find_controlled_publishers_present(
             filtered_cues,
@@ -1829,9 +1893,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         if matched_publishers:
             xmp_bytes = build_xmp_publishers(matched_publishers)
             temp_path = pdf_path.with_suffix(".xmp.tmp.pdf")
-            set_xmp_metadata(pdf_path, temp_path, xmp_bytes)
+            temp_paths.append(temp_path)
+            set_xmp_metadata(
+                pdf_path, temp_path, xmp_bytes, check_cancel=api.check_cancel
+            )
             if adjust_header:
                 make_top_space_first_page_inplace(temp_path, header_top_space)
+            api.check_cancel()
             deal_start_date_text, controlled_territory_text = resolve_publisher_fields(
                 matched_publishers,
                 cat_object,
@@ -1865,10 +1933,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 finally:
                     if temp_path.exists():
                         temp_path.unlink()
-                created_dirs.add("_stamped")
+                if temp_path in temp_paths:
+                    temp_paths.remove(temp_path)
+            created_dirs.add("_stamped")
         else:
             if adjust_header:
                 make_top_space_first_page_inplace(pdf_path, header_top_space)
+            api.check_cancel()
             nop_dir = pdf_path.parent / "_nop"
             nop_dir.mkdir(exist_ok=True)
             pdf_path.replace(nop_dir / pdf_path.name)

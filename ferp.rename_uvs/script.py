@@ -92,7 +92,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     target_dir = Path(ctx.target_path)
 
     confirmation = api.confirm(
-        "This action will rename one or more files.",
+        "This action will rename one or more files. Continue?",
         id="ferp_rename_uvs_confirm",
     )
     if not confirmation:
@@ -130,6 +130,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     needs_ocr = 0
     check = 0
     for index, pdf in enumerate(pdf_files, start=1):
+        api.check_cancel()
         text = _extract_first_page_text(pdf)
         if not text:
             try:

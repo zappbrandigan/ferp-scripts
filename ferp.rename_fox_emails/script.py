@@ -51,6 +51,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     renamed = 0
     for index, pdf in enumerate(pdf_files, start=1):
+        api.check_cancel()
         new_base = _derive_name(pdf)
         new_name = f"{new_base}{_SUFFIX}"
         if pdf.name == new_name:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from difflib import SequenceMatcher, unified_diff
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 import pdfplumber
 
@@ -24,13 +24,19 @@ def _resolve_input_path(target_dir: Path, raw_path: str) -> Path:
     return path
 
 
-def _extract_pdf_text(pdf_path: Path, api: sdk.ScriptAPI) -> PdfText:
+def _extract_pdf_text(
+    pdf_path: Path,
+    api: sdk.ScriptAPI,
+    check_cancel: Callable[[], None] | None = None,
+) -> PdfText:
     lines: list[str] = []
     text_line_count = 0
     try:
         with pdfplumber.open(str(pdf_path)) as pdf:
             total_pages = len(pdf.pages)
             for page_index, page in enumerate(pdf.pages, start=1):
+                if check_cancel is not None:
+                    check_cancel()
                 try:
                     text = page.extract_text() or ""
                 except Exception as exc:  # noqa: BLE001
@@ -137,8 +143,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.log("info", f"Extracting text from '{a_path.name}' and '{b_path.name}'")
 
-    a_text = _extract_pdf_text(a_path, api)
-    b_text = _extract_pdf_text(b_path, api)
+    api.check_cancel()
+    a_text = _extract_pdf_text(a_path, api, check_cancel=api.check_cancel)
+    api.check_cancel()
+    b_text = _extract_pdf_text(b_path, api, check_cancel=api.check_cancel)
 
     api.log(
         "info",
@@ -148,6 +156,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         ),
     )
 
+    api.check_cancel()
     matcher = SequenceMatcher(a=a_text.lines, b=b_text.lines)
     opcodes = matcher.get_opcodes()
     counts = _diff_counts(opcodes)

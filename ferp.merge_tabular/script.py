@@ -4,7 +4,7 @@ import csv
 import hashlib
 from collections import defaultdict
 from pathlib import Path
-from typing import Iterable, Iterator, List
+from typing import Callable, Iterable, Iterator, List
 
 import openpyxl
 
@@ -13,7 +13,9 @@ from ferp.fscp.scripts import sdk
 SUPPORTED_EXTS = {".csv", ".xlsx"}
 
 
-def _read_header(path: Path) -> List[str]:
+def _read_header(
+    path: Path, check_cancel: Callable[[], None] | None = None
+) -> List[str]:
     if path.suffix.lower() == ".csv":
         with path.open("r", newline="", encoding="utf-8") as fh:
             reader = csv.reader(fh)
@@ -36,12 +38,16 @@ def _read_xlsx_header(path: Path) -> List[str]:
     return ["" if cell is None else str(cell) for cell in header_row]
 
 
-def _iter_rows(path: Path) -> Iterator[Iterable[object]]:
+def _iter_rows(
+    path: Path, check_cancel: Callable[[], None] | None = None
+) -> Iterator[Iterable[object]]:
     if path.suffix.lower() == ".csv":
         with path.open("r", newline="", encoding="utf-8") as fh:
             reader = csv.reader(fh)
             next(reader, None)  # skip header
             for row in reader:
+                if check_cancel is not None:
+                    check_cancel()
                 yield row
     else:
         workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
@@ -50,6 +56,8 @@ def _iter_rows(path: Path) -> Iterator[Iterable[object]]:
             raise ValueError("Workbook has no active sheet")
         first = True
         for row in sheet.iter_rows(values_only=True):
+            if check_cancel is not None:
+                check_cancel()
             if first:
                 first = False
                 continue
@@ -75,12 +83,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     skipped: list[dict[str, str]] = []
 
     for entry in sorted(root.iterdir()):
+        api.check_cancel()
         if not entry.is_file():
             continue
         if entry.suffix.lower() not in SUPPORTED_EXTS:
             continue
         try:
-            header = tuple(_read_header(entry))
+            header = tuple(_read_header(entry, check_cancel=api.check_cancel))
             if not header:
                 raise ValueError("Missing header row")
             header_groups[header].append(entry)
@@ -92,6 +101,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     unmatched: list[str] = []
 
     for header, files in header_groups.items():
+        api.check_cancel()
         if len(files) < 2:
             unmatched.extend(str(path) for path in files)
             continue
@@ -102,8 +112,9 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 writer = csv.writer(fh)
                 writer.writerow(header)
                 for path in files:
+                    api.check_cancel()
                     try:
-                        for row in _iter_rows(path):
+                        for row in _iter_rows(path, check_cancel=api.check_cancel):
                             writer.writerow(row)
                     except Exception as exc:  # noqa: BLE001
                         skipped.append({"File": str(path), "Reason": str(exc)})

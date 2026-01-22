@@ -25,6 +25,15 @@ def _restore(backup_path: Path, api: sdk.ScriptAPI) -> None:
         raise ValueError("Selected file is not a backup archive.")
 
     output_dir = backup_path.parent / base_name
+    restored = False
+
+    def _cleanup() -> None:
+        if restored:
+            return
+        if output_dir.exists():
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    api.register_cleanup(_cleanup)
     if output_dir.exists():
         overwrite = api.confirm(
             f"Directory '{output_dir.name}' exists. Overwrite?",
@@ -44,15 +53,18 @@ def _restore(backup_path: Path, api: sdk.ScriptAPI) -> None:
         else:
             output_dir.unlink()
 
+    api.check_cancel()
     with zipfile.ZipFile(backup_path, "r") as zf:
         members = zf.infolist()
         output_dir.mkdir(parents=True, exist_ok=True)
 
         total = len(members) or 1
         for idx, member in enumerate(members, start=1):
+            api.check_cancel()
             zf.extract(member, output_dir)
             api.progress(current=idx, total=total, unit="files", every=25)
 
+    restored = True
     api.emit_result(
         {
             "_title": "Backup Restored",

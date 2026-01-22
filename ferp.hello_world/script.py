@@ -14,6 +14,13 @@ class SayHello(TypedDict):
 
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
+    temp_paths: list[str] = []
+
+    def _cleanup() -> None:
+        for temp in temp_paths:
+            api.log("debug", f"Cleanup: released {temp}")
+
+    api.register_cleanup(_cleanup)
     api.log("info", f"Hello World invoked for {ctx.target_path}")
 
     response_text = api.request_input(
@@ -44,7 +51,9 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     )
 
     for i in range(10):
-        time.sleep(0.1)
+        time.sleep(1)
+        api.check_cancel()
+        temp_paths.append(f"temp-resource-{i}")
         api.progress(current=i, total=10, unit="Hahas")
 
     api.emit_result(

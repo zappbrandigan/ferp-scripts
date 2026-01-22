@@ -159,6 +159,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     results: list[dict[str, object]] = []
 
     for index, pdf_path in enumerate(pdf_files, start=1):
+        api.check_cancel()
         api.progress(current=index, total=total_files, unit="files", every=10)
         try:
             reader = PdfReader(str(pdf_path))
@@ -177,6 +178,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             api.log("warn", f"Skipped encrypted PDF: {pdf_path}")
             continue
 
+        api.check_cancel()
         metadata = _normalize_metadata(reader)
         xmp = _extract_xmp(reader)
         if xmp:

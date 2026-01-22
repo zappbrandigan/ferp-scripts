@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import zipfile
 from pathlib import Path
+from typing import Callable
 
 import extract_msg
 
@@ -11,7 +12,11 @@ from ferp.fscp.scripts import sdk
 SKIP_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif"}
 
 
-def _extract_from_msg(msg_file: Path, output_dir: Path) -> int:
+def _extract_from_msg(
+    msg_file: Path,
+    output_dir: Path,
+    check_cancel: Callable[[], None] | None = None,
+) -> int:
     msg = extract_msg.Message(str(msg_file))
     attachments = list(msg.attachments)
 
@@ -20,6 +25,8 @@ def _extract_from_msg(msg_file: Path, output_dir: Path) -> int:
 
     saved = 0
     for attachment in attachments:
+        if check_cancel is not None:
+            check_cancel()
         name = attachment.longFilename or attachment.shortFilename
         if not name:
             continue
@@ -38,6 +45,15 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     output_dir = zip_path.parent / f"{zip_path.stem}_attachments"
     temp_dir = output_dir / "_unzipped"
+    extracted = False
+
+    def _cleanup() -> None:
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        if not extracted and output_dir.exists():
+            shutil.rmtree(output_dir, ignore_errors=True)
+
+    api.register_cleanup(_cleanup)
 
     if temp_dir.exists():
         shutil.rmtree(temp_dir)
@@ -66,11 +82,15 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     total_saved = 0
 
     for index, msg_file in enumerate(msg_files, start=1):
+        api.check_cancel()
         api.progress(current=index, total=len(msg_files), unit="messages", every=10)
-        saved = _extract_from_msg(msg_file, output_dir)
+        saved = _extract_from_msg(
+            msg_file, output_dir, check_cancel=api.check_cancel
+        )
         total_saved += saved
         api.log("info", f"{msg_file.name}: saved {saved} attachment(s)")
 
+    extracted = True
     shutil.rmtree(temp_dir, ignore_errors=True)
 
     api.emit_result(

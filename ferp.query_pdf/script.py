@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import re
 from pathlib import Path
-from typing import TypedDict
+from typing import Callable, TypedDict
 
 from PyPDF2 import PdfReader
 
@@ -38,6 +38,7 @@ def _process_pdf(
     pattern: re.Pattern[str],
     context_chars: int,
     api: sdk.ScriptAPI,
+    check_cancel: Callable[[], None] | None = None,
 ) -> list[dict[str, object]]:
     reader = PdfReader(str(pdf_path))
     if reader.is_encrypted:
@@ -48,6 +49,8 @@ def _process_pdf(
     relative_path = pdf_path.relative_to(root)
 
     for page_number, page in enumerate(reader.pages, start=1):
+        if check_cancel is not None:
+            check_cancel()
         try:
             text = page.extract_text() or ""
         except Exception as exc:  # noqa: BLE001
@@ -61,6 +64,8 @@ def _process_pdf(
             continue
 
         for match in pattern.finditer(text):
+            if check_cancel is not None:
+                check_cancel()
             span = match.span()
             context = _extract_context(text, span[0], span[1], context_chars)
             pdf_matches.append(
@@ -181,6 +186,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         return
 
     for index, pdf_path in enumerate(pdf_files, start=1):
+        api.check_cancel()
         api.progress(current=index, total=total_files or 1, unit="files")
         try:
             pdf_matches = _process_pdf(
@@ -189,6 +195,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 pattern,
                 context_chars,
                 api,
+                check_cancel=api.check_cancel,
             )
         except Exception as exc:  # noqa: BLE001
             api.log("warn", f"Failed to process '{pdf_path}': {exc}")

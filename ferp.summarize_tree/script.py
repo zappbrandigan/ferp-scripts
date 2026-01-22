@@ -3,22 +3,28 @@ from __future__ import annotations
 import os
 from collections import Counter
 from pathlib import Path
-from typing import Iterator, cast
+from typing import Callable, Iterator, cast
 
 from ferp.fscp.scripts import sdk
 
 MAX_DEPTH = 4
 
 
-def _walk(root: Path) -> Iterator[tuple[Path, str, Counter[str]]]:
+def _walk(
+    root: Path, check_cancel: Callable[[], None] | None = None
+) -> Iterator[tuple[Path, str, Counter[str]]]:
     stack: list[tuple[Path, int]] = [(root, 0)]
     while stack:
+        if check_cancel is not None:
+            check_cancel()
         directory, depth = stack.pop()
         counter: Counter[str] = Counter()
         try:
             with os.scandir(directory) as entries:
                 subdirs = []
                 for entry in entries:
+                    if check_cancel is not None:
+                        check_cancel()
                     name = entry.name
                     if name.startswith("."):
                         continue
@@ -143,7 +149,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     )
 
     summary = []
-    for directory, rel_path, file_counter in _walk(root):
+    for directory, rel_path, file_counter in _walk(root, check_cancel=api.check_cancel):
+        api.check_cancel()
         total = sum(file_counter.values())
         entry = {
             "relative_path": rel_path,
