@@ -26,7 +26,7 @@
       "version": "1.0.0",
       "script": "scripts/ferp.extract_pdf_metadata/script.py",
       "dependencies": [
-        "PyPDF2>=3.0"
+        "pypdf>=6.6.0"
       ],
       "target": "highlighted_directory"
     },
@@ -73,7 +73,7 @@
       "version": "1.0.0",
       "script": "scripts/ferp.query_pdf/script.py",
       "dependencies": [
-        "PyPDF2>=3.0"
+        "pypdf>=6.6.0"
       ],
       "target": "highlighted_directory"
     },
@@ -176,7 +176,7 @@
       "script": "scripts/ferp.process_cue_sheets/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8",
-        "PyPDF2>=3.0",
+        "pypdf>=3.0",
         "reportlab>=4.4.9"
       ],
       "target": "highlighted_directory"

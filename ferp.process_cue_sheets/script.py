@@ -5,6 +5,7 @@ import logging
 import math
 import os
 import re
+import shutil
 import tempfile
 import unicodedata
 import warnings
@@ -15,10 +16,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
 
 import pdfplumber
 from pdfplumber.page import Page
-from PyPDF2 import PdfReader, PdfWriter, Transformation
-from PyPDF2._page import PageObject
-from PyPDF2.errors import PdfReadWarning
-from PyPDF2.generic import DictionaryObject, NameObject, NumberObject, StreamObject
+from pypdf import PdfReader, PdfWriter, Transformation
+from pypdf._page import PageObject
+from pypdf.errors import PdfReadWarning
+from pypdf.generic import NameObject, NumberObject, StreamObject
 
 # from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.utils import ImageReader
@@ -30,7 +31,7 @@ from typing_extensions import Literal
 from ferp.fscp.scripts import sdk
 
 warnings.filterwarnings("ignore", category=PdfReadWarning)
-logging.getLogger("PyPDF2").setLevel(logging.ERROR)
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 LOGO_RE = re.compile(r"(?<![A-Z0-9])logos?(?![A-Z0-9])", re.IGNORECASE)
 _CONTEXT_EE_RE = re.compile(r"(?<![A-Z0-9])EE(?![A-Z0-9])")
@@ -999,42 +1000,20 @@ def set_xmp_metadata(
         writer.write(handle)
 
 
-def _copy_xmp_metadata(reader: PdfReader, writer: PdfWriter) -> None:
+def set_xmp_metadata_inplace(
+    pdf_path: Path,
+    xmp_bytes: bytes,
+    check_cancel: Callable[[], None] | None = None,
+) -> None:
+    dir_name = os.path.dirname(pdf_path)
+    with tempfile.NamedTemporaryFile(delete=False, dir=dir_name, suffix=".pdf") as tmp:
+        tmp_path = Path(tmp.name)
     try:
-        root_obj = reader.trailer.get("/Root")
-        root_dict = root_obj.get_object() if root_obj else None
-        if not isinstance(root_dict, DictionaryObject):
-            return
-        metadata_obj = root_dict.get("/Metadata")
-        if not metadata_obj:
-            return
-        md_stream = metadata_obj.get_object()
-        get_data = getattr(md_stream, "get_data", None)
-        if callable(get_data):
-            data = get_data()
-        else:
-            data = getattr(md_stream, "_data", None)
-        if not data:
-            return
-        if not isinstance(data, (bytes, bytearray)):
-            return
-        new_stream = StreamObject()
-        set_data = getattr(new_stream, "set_data", None)
-        if callable(set_data):
-            set_data(data)
-        else:
-            new_stream._data = data
-            new_stream.update({NameObject("/Length"): NumberObject(len(data))})
-        new_stream.update(
-            {
-                NameObject("/Type"): NameObject("/Metadata"),
-                NameObject("/Subtype"): NameObject("/XML"),
-            }
-        )
-        md_ref = writer._add_object(new_stream)
-        writer._root_object.update({NameObject("/Metadata"): md_ref})
-    except Exception:  # noqa: BLE001
-        return
+        set_xmp_metadata(pdf_path, tmp_path, xmp_bytes, check_cancel=check_cancel)
+        os.replace(tmp_path, pdf_path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
 
 
 def wrap_text(text: str, font_name: str, font_size: float, max_width: float):
@@ -1592,8 +1571,6 @@ def add_stamp(
         if info:
             writer.add_metadata(info)
 
-    _copy_xmp_metadata(reader, writer)
-
     output_path.parent.mkdir(exist_ok=True)
     with output_path.open("wb") as handle:
         writer.write(handle)
@@ -1670,8 +1647,8 @@ def make_top_space_first_page_inplace(
             writer.add_page(src_page)
             continue
 
-        # Prefer CropBox visually; fall back to MediaBox
-        box = src_page.cropbox or src_page.mediabox
+        # Use MediaBox for physical page size
+        box = src_page.mediabox
         width = float(box.width)
         height = float(box.height)
 
@@ -1679,7 +1656,15 @@ def make_top_space_first_page_inplace(
         dx = (1.0 - scale_value) * width / 2.0
         dy = (1.0 - scale_value) * height - top_space
 
-        dst_page = PageObject.create_blank_page(width=width, height=height)
+        dst_page = PageObject.create_blank_page(pdf=writer, width=width, height=height)
+        if src_page.cropbox:
+            dst_page.cropbox = src_page.cropbox
+        if getattr(src_page, "bleedbox", None):
+            dst_page.bleedbox = src_page.bleedbox
+        if getattr(src_page, "trimbox", None):
+            dst_page.trimbox = src_page.trimbox
+        if getattr(src_page, "artbox", None):
+            dst_page.artbox = src_page.artbox
         transform = Transformation().scale(scale_value, scale_value).translate(dx, dy)
         merge_transformed = getattr(dst_page, "merge_transformed_page", None)
         if callable(merge_transformed):
@@ -1695,13 +1680,10 @@ def make_top_space_first_page_inplace(
     if reader.metadata:
         md: dict[str, str] = {}
         for k, v in reader.metadata.items():
-            if k and v is not None:
+            if isinstance(k, str) and k.startswith("/") and v is not None:
                 md[str(k)] = str(v)
         if md:
             writer.add_metadata(md)
-
-    # ---- Best-effort XMP metadata preservation ----
-    _copy_xmp_metadata(reader, writer)
 
     # ---- Safe in-place overwrite ----
     dir_name = os.path.dirname(pdf_path)
@@ -1892,13 +1874,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         accuracy_audits = result.get("evidence_by_controlled", {})
         if matched_publishers:
             xmp_bytes = build_xmp_publishers(matched_publishers)
-            temp_path = pdf_path.with_suffix(".xmp.tmp.pdf")
-            temp_paths.append(temp_path)
-            set_xmp_metadata(
-                pdf_path, temp_path, xmp_bytes, check_cancel=api.check_cancel
-            )
+            work_path = pdf_path
             if adjust_header:
+                temp_path = pdf_path.with_suffix(".header.tmp.pdf")
+                temp_paths.append(temp_path)
+                shutil.copyfile(pdf_path, temp_path)
                 make_top_space_first_page_inplace(temp_path, header_top_space)
+                work_path = temp_path
             api.check_cancel()
             deal_start_date_text, controlled_territory_text = resolve_publisher_fields(
                 matched_publishers,
@@ -1909,32 +1891,35 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 cat_object,
             )
             if in_place:
-                temp_path.replace(pdf_path)
                 add_stamp(
-                    pdf_path,
+                    work_path,
                     pdf_path,
                     matched_publishers,
                     deal_start_date_text,
                     controlled_territory_text,
                     multi_territory_rows,
                 )
+                set_xmp_metadata_inplace(
+                    pdf_path,
+                    xmp_bytes,
+                    check_cancel=api.check_cancel,
+                )
             else:
                 out_dir = pdf_path.parent / "_stamped"
                 out_path = out_dir / pdf_path.name
-                try:
-                    add_stamp(
-                        temp_path,
-                        out_path,
-                        matched_publishers,
-                        deal_start_date_text,
-                        controlled_territory_text,
-                        multi_territory_rows,
-                    )
-                finally:
-                    if temp_path.exists():
-                        temp_path.unlink()
-                if temp_path in temp_paths:
-                    temp_paths.remove(temp_path)
+                add_stamp(
+                    work_path,
+                    out_path,
+                    matched_publishers,
+                    deal_start_date_text,
+                    controlled_territory_text,
+                    multi_territory_rows,
+                )
+                set_xmp_metadata_inplace(
+                    out_path,
+                    xmp_bytes,
+                    check_cancel=api.check_cancel,
+                )
             created_dirs.add("_stamped")
         else:
             if adjust_header:

@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import TypedDict
 
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 from ferp.fscp.scripts import sdk
 
