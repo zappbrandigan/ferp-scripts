@@ -56,6 +56,7 @@ def _page_setup(worksheet, print_area, autocolumn):
     """Set default print to pdf page setup options."""
     if autocolumn:
         worksheet.Columns.AutoFit()
+    worksheet.PageSetup.Zoom = False
     worksheet.PageSetup.Orientation = 2  # landscape:2, portrait:1
     worksheet.PageSetup.FitToPagesTall = False
     worksheet.PageSetup.FitToPagesWide = 1
