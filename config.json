@@ -123,7 +123,7 @@
     {
       "id": "ferp.moonbug",
       "name": "Convert: Moonbug to PDF",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "script": "scripts/ferp.moonbug/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
@@ -133,7 +133,7 @@
     {
       "id": "ferp.convert_excel",
       "name": "Convert: Excel to PDF",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "script": "scripts/ferp.convert_excel/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
