@@ -17,7 +17,8 @@
       ],
       "target": "highlighted_file",
       "file_extensions": [
-        ".zip", ".7z"
+        ".zip",
+        ".7z"
       ]
     },
     {
@@ -122,7 +123,7 @@
     {
       "id": "ferp.moonbug",
       "name": "Convert: Moonbug to PDF",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "script": "scripts/ferp.moonbug/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
