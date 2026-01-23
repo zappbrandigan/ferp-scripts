@@ -213,6 +213,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     is_test = payload["test"]
 
     root_path = ctx.target_path
+    xl_files = _collect_excel_files(root_path, recursive=recursive)
+    total_files = len(xl_files)
 
     if ctx.environment["host"]["platform"] != "win32":
         api.log(
@@ -227,13 +229,28 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "Target": str(root_path),
                 "Is Test": is_test,
                 "Autofit Column": autofit_column,
-                "Files Found": len(sorted(root_path.rglob("*.xls*"))),
+                "Files Found": total_files,
             }
         )
         return
 
-    xl_files = _collect_excel_files(root_path, recursive=recursive)
-    total_files = len(xl_files)
+    if total_files == 0:
+        api.log("warn", "No Excel files found.")
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Warning: No Excel Files Found",
+                **(
+                    {"Dry Run": False}
+                    if ctx.environment["host"]["platform"] == "darwin"
+                    else {}
+                ),
+                "Target": str(root_path),
+                "Files Found": 0,
+            }
+        )
+        return
+
     if is_test:
         xl_files = xl_files[0:1]
         total_files = 1
@@ -245,11 +262,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     base_name_map_by_dir: dict[Path, dict[str, Path | None]] = {}
     moved_to_check: set[Path] = set()
     moved_to_none: set[Path] = set()
+    converted: list[str] = []
+    failures: list[str] = []
 
     try:
         for index, file in enumerate(xl_files, start=1):
             # conversion is slow, emit every iteration
-            api.progress(current=index, total=total_files, unit="files")
             workbook = None
             destination = None
             base_name = None
@@ -275,10 +293,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     parent_dir, base_name, ".pdf", force_suffix=collision
                 )
                 _export_pdf(worksheet, destination)
+                converted.append(str(destination))
+                api.progress(current=index, total=total_files, unit="files")
                 if base_name not in base_name_map:
                     base_name_map[base_name] = None if preexisting_base_pdf else file
-            except Exception as e:
-                api.log("warn", f"Failed to process '{file}': {e}")
+            except Exception as exc:
+                api.log("warn", f"Failed to process '{file}': {exc}")
+                failures.append(f"{destination}: {exc}")
             finally:
                 if workbook is not None:
                     workbook.Close(SaveChanges=False)
@@ -336,10 +357,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.emit_result(
         {
-            "_title": "Moonbug Conversion Complete",
-            "Location": str(root_path),
+            "_title": "Moonbug Conversion Summary",
             "Is Test": is_test,
             "Autofit Column": autofit_column,
+            "Failures": failures,
             "Files Converted": total_files,
         }
     )

@@ -8,6 +8,7 @@ from ferp.fscp.scripts import sdk
 
 class UserResponse(TypedDict):
     value: str
+    autofitcolumn: bool
     recursive: bool
     test: bool
 
@@ -20,6 +21,46 @@ def _start_excel():
     xl_obj.Visible = False
     xl_obj.DisplayAlerts = False
     return xl_obj
+
+
+def _get_print_area(worksheet):
+    """Find last column and last row containing data to determine print area."""
+    from win32com import client  # type: ignore
+
+    column_letters = [chr(x) for x in range(65, 91)]
+    col_last_row = {}
+
+    for letter in column_letters:
+        try:
+            col_last_row[letter] = (
+                worksheet.Cells(worksheet.Rows.Count, letter)
+                .End(client.constants.xlShiftUp)
+                .Row
+            )
+        except Exception:
+            col_last_row[letter] = 1
+
+    columns_with_data = [k for k, v in col_last_row.items() if v > 1]
+    if not columns_with_data:
+        return "A1"
+
+    last_row = max(col_last_row.values())
+    last_column = max(columns_with_data)
+
+    return f"A1:{last_column}{last_row}"
+
+
+def _page_setup(worksheet, print_area, autocolumn):
+    """Set default print to pdf page setup options."""
+    if autocolumn:
+        worksheet.Columns.AutoFit()
+    worksheet.PageSetup.Zoom = False
+    worksheet.PageSetup.Orientation = 2  # landscape:2, portrait:1
+    worksheet.PageSetup.FitToPagesTall = False
+    worksheet.PageSetup.FitToPagesWide = 1
+    worksheet.PageSetup.PrintTitleColumns = False
+    worksheet.PageSetup.PrintTitleRows = False
+    worksheet.PageSetup.PrintArea = print_area
 
 
 def _collect_excel_files(root: Path, recursive: bool) -> list[Path]:
@@ -49,7 +90,20 @@ def _export_pdf(workbook, out_file: Path) -> None:
 
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    target = ctx.target_path
+    confirm = api.confirm(
+        "Before continuing, close all Excel windows/files. "
+        "For best results, run a test first (enable Test mode). Continue?",
+        default=False,
+    )
+    if not confirm:
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Excel Conversion Canceled by User",
+                "Info": "No file operations were performed.",
+            }
+        )
+        return
 
     payload = api.request_input_json(
         "Options for Excel to PDF Conversion",
@@ -61,6 +115,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "label": "Scan subdirectories",
                 "default": False,
             },
+            {
+                "id": "autofitcolumn",
+                "type": "bool",
+                "label": "Autofit columns",
+                "default": True,
+            },
             {"id": "test", "type": "bool", "label": "Test mode", "default": False},
         ],
         show_text_input=False,
@@ -68,26 +128,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     )
 
     recursive = payload["recursive"]
+    autofit_colulmn = payload["autofitcolumn"]
     is_test = payload["test"]
 
+    target = ctx.target_path
     xl_files = _collect_excel_files(target, recursive=recursive)
     total_files = len(xl_files)
-    if total_files == 0:
-        api.log("warn", "No Excel files found.")
-        api.emit_result(
-            {
-                "_status": "warn",
-                "_title": "Warning: No Excel Files Found",
-                **(
-                    {"Dry Run": False}
-                    if ctx.environment["host"]["platform"] == "darwin"
-                    else {}
-                ),
-                "Target": str(target),
-                "Files Found": 0,
-            }
-        )
-        return
 
     if ctx.environment["host"]["platform"] != "win32":
         api.log(
@@ -107,6 +153,23 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         )
         return
 
+    if total_files == 0:
+        api.log("warn", "No Excel files found.")
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Warning: No Excel Files Found",
+                **(
+                    {"Dry Run": False}
+                    if ctx.environment["host"]["platform"] == "darwin"
+                    else {}
+                ),
+                "Target": str(target),
+                "Files Found": 0,
+            }
+        )
+        return
+
     if is_test:
         xl_files = xl_files[:1]
         total_files = 1
@@ -121,14 +184,15 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     try:
         for index, file_path in enumerate(xl_files, start=1):
             # coversion is slow, emit every iteration
-            api.progress(current=index, total=total_files, unit="files")
             workbook = None
             try:
                 workbook = xl_window.Workbooks.Open(str(file_path))
                 out_path = _build_destination(file_path.parent, file_path.stem, ".pdf")
                 _export_pdf(workbook, out_path)
                 converted.append(str(out_path))
+                api.progress(current=index, total=total_files, unit="files")
             except Exception as exc:
+                api.log("warn", f"Failed to process '{file_path}': {exc}")
                 failures.append(f"{file_path}: {exc}")
             finally:
                 if workbook is not None:
@@ -138,9 +202,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.emit_result(
         {
-            "_status": "success",
-            "_title": "Excel Conversion Finished",
+            "_title": "Excel Conversion Summary",
             "Converted": converted,
+            "Is Test": is_test,
+            "Autofit Colum": autofit_colulmn,
             "Failures": failures,
             "Files Found": total_files,
         }
