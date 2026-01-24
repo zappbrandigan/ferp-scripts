@@ -16,8 +16,10 @@ formats, and tags matched publishers with XMP metadata and a stamped badge.
 1. Highlight a directory containing cue sheet PDFs in FERP.
 2. Run `Process: Stamp Cue Sheets` from the Scripts panel.
 3. Enter a category code (for example, `uvs`).
-4. Toggle `Scan subdirectories` if needed.
-5. Review logs and the output folders.
+4. (Optional) Select `Add header` to add blank space at the top of the PDF.
+5. (Optional) Select `Recursive` if you want to process subdirectories.
+6. (Optional) Toggle `Select publishers` to bypass parsing and manually choose publishers for the stamp.
+7. Review logs and the output folders.
 
 ## Behavior
 
@@ -25,8 +27,7 @@ formats, and tags matched publishers with XMP metadata and a stamped badge.
 - Matches controlled publishers from the cached category list.
 - Adds XMP metadata for matched publishers and stamps the first page.
 - By default, writes stamped PDFs to an `_stamped` folder next to the source file.
-- Optional `Overwrite existing PDFs` updates the original
-  file instead of writing to `_stamped`.
+- Optional `Overwrite` updates the original files instead of writing to `_stamped`.
 - Moves unmatched PDFs into a `_nop` folder.
 
 ## Notes

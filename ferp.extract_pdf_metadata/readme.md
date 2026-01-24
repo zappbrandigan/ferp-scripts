@@ -15,7 +15,7 @@ optional recursive scanning and CSV output.
 
 1. Highlight a directory containing PDFs in FERP.
 2. Run `Extract PDF Metadata` from the Scripts panel.
-3. Toggle `Scan subdirectories` or `Write CSV summary` as needed.
+3. Toggle `Recursive` or `Write CSV summary` as needed.
 4. Review metadata in the output panel and optional CSV file.
 
 ## Behavior

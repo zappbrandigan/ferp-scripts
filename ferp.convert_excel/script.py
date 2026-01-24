@@ -112,7 +112,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             {
                 "id": "recursive",
                 "type": "bool",
-                "label": "Scan subdirectories",
+                "label": "Recursive",
                 "default": False,
             },
             {

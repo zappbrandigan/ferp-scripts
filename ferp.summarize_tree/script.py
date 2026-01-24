@@ -116,13 +116,13 @@ def _build_summary_table(entries: list[dict[str, object]]) -> str:
 
 
 def _build_destination(directory: Path, base: str, suffix: str) -> Path:
-    candidate = directory / f"{base}{suffix}"
+    candidate = directory.parent / f"{base}{suffix}"
     if not candidate.exists():
         return candidate
 
     counter = 1
     while True:
-        candidate = directory / f"{base}_{counter:02d}{suffix}"
+        candidate = directory.parent / f"{base}_{counter:02d}{suffix}"
         if not candidate.exists():
             return candidate
         counter += 1
@@ -170,7 +170,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     total_files = sum(entry["total_files"] for entry in summary)
     header = {
-        "Root": str(root),
+        "Root": str(root.name),
         "Max Depth": str(MAX_DEPTH),
         "Directories Scanned": str(len(summary)),
         "Total Files": str(total_files),
@@ -196,13 +196,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     api.emit_result(
         {
             "_title": "Directory Summary",
-            "Root": str(root),
-            "Markdown Path": str(export_path) if export_path else "Not exported.",
             **(header),
+            "Markdown Path": str(export_path.relative_to(root.parents[1]))
+            if export_path
+            else "Not exported.",
             "Extension Details": "\n" + "\n".join(lines),
         }
     )
-    api.exit(code=0)
 
 
 if __name__ == "__main__":

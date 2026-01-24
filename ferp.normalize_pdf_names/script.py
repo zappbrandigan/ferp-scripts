@@ -47,9 +47,7 @@ _ARTICLE_MATCH_TRANSLATION = str.maketrans(
     }
 )
 _ARTICLE_TOKENS = {
-    article.lower()
-    for articles in language_articles.values()
-    for article in articles
+    article.lower() for articles in language_articles.values() for article in articles
 }
 _ARTICLE_PREFIXES = tuple(
     article.lower()
@@ -608,7 +606,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             {
                 "id": "recursive",
                 "type": "bool",
-                "label": "Scan subdirectories",
+                "label": "Recursive",
                 "default": False,
             }
         ],

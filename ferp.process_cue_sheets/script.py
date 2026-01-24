@@ -137,7 +137,9 @@ def sm_find_table_start_y(rows) -> Optional[float]:
 
 
 def parse_soundmouse(
-    pdf_path: Path, check_cancel: Callable[[], None] | None = None
+    pdf_path: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> list[Dict[str, Any]]:
     """
     Parse Soundmouse cue sheets into a list of cue dictionaries.
@@ -181,13 +183,19 @@ def parse_soundmouse(
         s = str(v).strip()
         return s or None
 
+    pages_scanned = 0
+    pages_with_tables = 0
+    words_total = 0
+    rows_total = 0
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             if check_cancel is not None:
                 check_cancel()
+            pages_scanned += 1
             words = sm_extract_words(page)
             if not words:
                 continue
+            words_total += len(words)
 
             rows = sm_cluster_rows(words)
 
@@ -195,12 +203,14 @@ def parse_soundmouse(
             if table_start_y is None:
                 continue
 
+            pages_with_tables += 1
             table_words = [w for w in words if w["top"] > table_start_y]
             table_rows = sm_cluster_rows(table_words)
 
             for row in table_rows:
                 if check_cancel is not None:
                     check_cancel()
+                rows_total += 1
                 record = {name: [] for name, *_ in SOUNDMOUSE_COLUMNS}
                 for w in row:
                     col = sm_assign_column(w["x0"])
@@ -270,6 +280,12 @@ def parse_soundmouse(
 
         flush_current()
 
+    if log_fn:
+        log_fn(
+            "soundmouse parser: "
+            f"pages={pages_scanned} | pages_with_table={pages_with_tables} | "
+            f"words={words_total} | rows={rows_total} | cues={len(cues)}"
+        )
     return cues
 
 
@@ -308,7 +324,13 @@ RC_ROLE_START_RE = re.compile(r"^(C|A|CA|AR|E)\s+(.+)$")
 RC_SOCIETY_PERCENT_RE = re.compile(r"(.*?)\s+([A-Z]+)\s+(\d+(?:\.\d+)?)$")
 
 # Known RapidCue descriptor prefixes
-RC_DESCRIPTOR_TERMS = {"THEME", "MAIN TITLE", "OPENING", "CLOSING", "BUMPER"}
+RC_DESCRIPTOR_TERMS = {
+    "THEME",
+    "MAIN TITLE",
+    "OPENING",
+    "CLOSING",
+    "BUMPER",
+}
 
 
 def _norm(s: str) -> str:
@@ -345,6 +367,12 @@ def is_rapidcue_clutter(line: str) -> bool:
     if s.startswith("USAGES:"):
         return True
 
+    # Comment / artist notes
+    if re.search(r"comments?:", s, flags=re.IGNORECASE):
+        return True
+    if re.search(r"artists?:", s, flags=re.IGNORECASE):
+        return True
+
     # Role legend lines
     if re.search(r"\bC\s*-\s*COMPOSER\b", s) and re.search(r"\bE\s*-\s*PUBLISHER\b", s):
         return True
@@ -370,13 +398,17 @@ def is_rapidcue_clutter(line: str) -> bool:
 
 
 def rc_extract_lines(
-    pdf_path: Path, check_cancel: Callable[[], None] | None = None
+    pdf_path: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> List[str]:
     lines: List[str] = []
+    pages_scanned = 0
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             if check_cancel is not None:
                 check_cancel()
+            pages_scanned += 1
             text = page.extract_text() or ""
             for line in text.splitlines():
                 if check_cancel is not None:
@@ -387,6 +419,9 @@ def rc_extract_lines(
                 if is_rapidcue_clutter(line):
                     continue
                 lines.append(line)
+    if log_fn:
+        log_fn(f"rapidcue parser: pages={pages_scanned} | extracted_lines={len(lines)}")
+        log_fn(f"rapidcue parser: extracted_text={lines}")
     return lines
 
 
@@ -409,9 +444,11 @@ def rc_peel_descriptor_prefix(line: str) -> Tuple[Optional[str], str]:
 
 
 def parse_rapidcue(
-    pdf_path: Path, check_cancel: Callable[[], None] | None = None
+    pdf_path: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+    check_cancel: Callable[[], None] | None = None,
 ) -> list[Dict[str, Any]]:
-    lines = rc_extract_lines(pdf_path, check_cancel=check_cancel)
+    lines = rc_extract_lines(pdf_path, log_fn=log_fn, check_cancel=check_cancel)
     cues: List[Dict[str, Any]] = []
 
     current_cue: Optional[Dict[str, Any]] = None
@@ -498,6 +535,8 @@ def parse_rapidcue(
     if current_cue:
         cues.append(current_cue)
 
+    if log_fn:
+        log_fn(f"rapidcue parser: cues={len(cues)}")
     return cues
 
 
@@ -1793,25 +1832,25 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             {
                 "id": "recursive",
                 "type": "bool",
-                "label": "Scan subdirectories",
+                "label": "Recursive",
                 "default": False,
             },
             {
                 "id": "in_place",
                 "type": "bool",
-                "label": "Overwrite existing PDFs",
+                "label": "Overwrite files",
                 "default": False,
             },
             {
                 "id": "adjust_header",
                 "type": "bool",
-                "label": "Add header space",
+                "label": "Add header",
                 "default": False,
             },
             {
                 "id": "manual_select",
                 "type": "bool",
-                "label": "Choose pubs",
+                "label": "Select publishers",
                 "default": False,
             },
         ],
@@ -1925,10 +1964,18 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             fmt = detect_format(pdf_path)
             if fmt == "soundmouse":
                 api.log("debug", f"{pdf_path.name}: detected Soundmouse format")
-                raw_cues = parse_soundmouse(pdf_path, check_cancel=api.check_cancel)
+                raw_cues = parse_soundmouse(
+                    pdf_path,
+                    log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
+                    check_cancel=api.check_cancel,
+                )
             elif fmt == "rapidcue":
                 api.log("debug", f"{pdf_path.name}: detected RapidCue format")
-                raw_cues = parse_rapidcue(pdf_path, check_cancel=api.check_cancel)
+                raw_cues = parse_rapidcue(
+                    pdf_path,
+                    log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
+                    check_cancel=api.check_cancel,
+                )
             else:
                 api.log(
                     "debug", f"{pdf_path.name}: unknown format; using default parser"
