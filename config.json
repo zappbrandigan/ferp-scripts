@@ -123,7 +123,7 @@
     {
       "id": "ferp.moonbug",
       "name": "Convert: Moonbug to PDF",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "script": "scripts/ferp.moonbug/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
@@ -143,7 +143,7 @@
     {
       "id": "ferp.rename_uvs",
       "name": "Rename: UVS",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "script": "scripts/ferp.rename_uvs/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8"
