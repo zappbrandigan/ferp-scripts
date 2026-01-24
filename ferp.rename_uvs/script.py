@@ -144,83 +144,86 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     "error",
                     f"Failed to move '{pdf.name}' to '{_NEEDS_OCR_DIRNAME}': {exc}",
                 )
-            api.progress(current=index, total=len(pdf_files), unit="files")
-            continue
-
-        try:
-            new_base = _derive_name(pdf, text)
-        except (ValueError, AttributeError) as exc:
-            skipped += 1
-            check_dir = target_dir / _CHECK_DIRNAME
+        else:
             try:
-                moved = _move_to_dir(pdf, check_dir)
-                check += 1
-                api.log(
-                    "warn",
-                    f"Skipping '{pdf.name}': {exc}. Moved to '{_CHECK_DIRNAME}' as '{moved.name}'.",
-                )
-            except OSError as move_exc:
-                api.log(
-                    "error",
-                    f"Skipping '{pdf.name}': {exc}. Failed to move to '{_CHECK_DIRNAME}': {move_exc}",
-                )
-            api.progress(current=index, total=len(pdf_files), unit="files")
-            continue
+                new_base = _derive_name(pdf, text)
+            except (ValueError, AttributeError) as exc:
+                skipped += 1
+                check_dir = target_dir / _CHECK_DIRNAME
+                try:
+                    moved = _move_to_dir(pdf, check_dir)
+                    check += 1
+                    api.log(
+                        "warn",
+                        f"Skipping '{pdf.name}': {exc}. Moved to '{_CHECK_DIRNAME}' as '{moved.name}'.",
+                    )
+                except OSError as move_exc:
+                    api.log(
+                        "error",
+                        f"Skipping '{pdf.name}': {exc}. Failed to move to '{_CHECK_DIRNAME}': {move_exc}",
+                    )
+            else:
+                new_name = f"{new_base}{_SUFFIX}"
+                if pdf.name == new_name:
+                    check_dir = target_dir / _CHECK_DIRNAME
+                    try:
+                        moved = _move_to_dir(pdf, check_dir, new_base)
+                        check += 1
+                        api.log(
+                            "warn",
+                            f"Skipping '{pdf.name}': already matches target pattern. "
+                            f"Moved to '{_CHECK_DIRNAME}' as '{moved.name}'.",
+                        )
+                    except OSError as exc:
+                        api.log(
+                            "error",
+                            f"Skipping '{pdf.name}': already matches target pattern. "
+                            f"Failed to move to '{_CHECK_DIRNAME}': {exc}",
+                        )
+                else:
+                    base_destination = target_dir / new_name
+                    if base_destination.exists():
+                        check_dir = target_dir / _CHECK_DIRNAME
+                        try:
+                            existing_destination = _move_to_dir(
+                                base_destination, check_dir, new_base
+                            )
+                            incoming_destination = _move_to_dir(
+                                pdf, check_dir, new_base
+                            )
+                            check += 1
+                            api.log(
+                                "warn",
+                                "Conflict for '{original}' -> '{target}'. "
+                                "Moved existing to '{existing}' and incoming to '{incoming}'.".format(
+                                    original=pdf.name,
+                                    target=new_name,
+                                    existing=existing_destination.name,
+                                    incoming=incoming_destination.name,
+                                ),
+                            )
+                        except OSError as exc:
+                            api.log(
+                                "error", f"Failed to move conflict '{pdf.name}': {exc}"
+                            )
+                    else:
+                        destination = _build_destination(target_dir, new_base, _SUFFIX)
 
-        new_name = f"{new_base}{_SUFFIX}"
-        if pdf.name == new_name:
-            check_dir = target_dir / _CHECK_DIRNAME
-            try:
-                moved = _move_to_dir(pdf, check_dir, new_base)
-                check += 1
-                api.log(
-                    "warn",
-                    f"Skipping '{pdf.name}': already matches target pattern. "
-                    f"Moved to '{_CHECK_DIRNAME}' as '{moved.name}'.",
-                )
-            except OSError as exc:
-                api.log(
-                    "error",
-                    f"Skipping '{pdf.name}': already matches target pattern. "
-                    f"Failed to move to '{_CHECK_DIRNAME}': {exc}",
-                )
-            api.progress(current=index, total=len(pdf_files), unit="files")
-            continue
+                        try:
+                            pdf.rename(destination)
+                            renamed += 1
+                            api.log(
+                                "info", f"Renamed '{pdf.name}' -> '{destination.name}'"
+                            )
+                        except OSError as exc:
+                            api.log("error", f"Failed to rename '{pdf.name}': {exc}")
 
-        base_destination = target_dir / new_name
-        if base_destination.exists():
-            check_dir = target_dir / _CHECK_DIRNAME
-            try:
-                existing_destination = _move_to_dir(
-                    base_destination, check_dir, new_base
-                )
-                incoming_destination = _move_to_dir(pdf, check_dir, new_base)
-                check += 1
-                api.log(
-                    "warn",
-                    "Conflict for '{original}' -> '{target}'. "
-                    "Moved existing to '{existing}' and incoming to '{incoming}'.".format(
-                        original=pdf.name,
-                        target=new_name,
-                        existing=existing_destination.name,
-                        incoming=incoming_destination.name,
-                    ),
-                )
-            except OSError as exc:
-                api.log("error", f"Failed to move conflict '{pdf.name}': {exc}")
-            api.progress(current=index, total=len(pdf_files), unit="files")
-            continue
-
-        destination = _build_destination(target_dir, new_base, _SUFFIX)
-
-        try:
-            pdf.rename(destination)
-            renamed += 1
-            api.log("info", f"Renamed '{pdf.name}' -> '{destination.name}'")
-        except OSError as exc:
-            api.log("error", f"Failed to rename '{pdf.name}': {exc}")
-
-        api.progress(current=index, total=len(pdf_files), unit="files")
+        api.progress(
+            current=index,
+            total=len(pdf_files),
+            unit="files",
+            message="Renaming files...",
+        )
 
     api.emit_result(
         {

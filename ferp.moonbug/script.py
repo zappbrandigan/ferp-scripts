@@ -294,7 +294,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 )
                 _export_pdf(worksheet, destination)
                 converted.append(str(destination))
-                api.progress(current=index, total=total_files, unit="files")
+                api.progress(
+                    current=index,
+                    total=total_files,
+                    unit="files",
+                    message=f"Converting files in {parent_dir}",
+                )
                 if base_name not in base_name_map:
                     base_name_map[base_name] = None if preexisting_base_pdf else file
             except Exception as exc:
