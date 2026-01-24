@@ -42,6 +42,12 @@ class UserResponse(TypedDict):
     recursive: bool
     in_place: bool
     adjust_header: bool
+    manual_select: bool
+
+
+class PublisherSelectionResponse(TypedDict):
+    value: str
+    selected_pubs: list[str]
 
 
 # =================================================
@@ -528,55 +534,61 @@ def parse_default(
     controlled_publishers: list[str],
     log_fn: Optional[Callable[[str], None]] = None,
     check_cancel: Callable[[], None] | None = None,
+    logo_context_chars: int = 180,
 ) -> list[Dict[str, Any]]:
     cues: List[Dict[str, Any]] = []
     controlled_norm = [
         (pub, canonicalize_publisher_name(pub, drop_suffixes=True))
         for pub in controlled_publishers
     ]
-    skipped_context = 0
-    matched_lines = 0
-    for line in default_extract_lines(
-        pdf_path, log_fn=log_fn, check_cancel=check_cancel
-    ):
+    lines = default_extract_lines(pdf_path, log_fn=log_fn, check_cancel=check_cancel)
+    full_text = " ".join(lines)
+    canon_text = canonicalize_text_for_search(full_text)
+    matched_publishers_count = 0
+    skipped_logo_matches = 0
+    seen_publishers: set[str] = set()
+
+    for raw_name, norm_name in controlled_norm:
         if check_cancel is not None:
             check_cancel()
-        if _CONTEXT_EE_RE.search(line.upper()) or LOGO_RE.search(line):
-            skipped_context += 1
+        if not norm_name or raw_name in seen_publishers:
             continue
-        line_norm = canonicalize_text_for_search(line)
-        if not line_norm:
-            continue
-        matched_publishers = []
-        for raw_name, norm_name in controlled_norm:
-            if not norm_name:
-                continue
-            if norm_name in line_norm:
-                matched_publishers.append({"name": raw_name})
-        if not matched_publishers:
-            continue
-        matched_lines += 1
-        if log_fn:
-            preview = line if len(line) <= 120 else f"{line[:117]}..."
-            log_fn(
-                "default parser: matched_line="
-                f"{preview} | publishers={', '.join(p['name'] for p in matched_publishers)}"
+        start = 0
+        matched = False
+        while True:
+            idx = canon_text.find(norm_name, start)
+            if idx == -1:
+                break
+            context_start = max(0, idx - logo_context_chars)
+            context_end = min(
+                len(canon_text), idx + len(norm_name) + logo_context_chars
             )
-        cues.append(
-            {
-                "seq": None,
-                "title": line,
-                "usage": None,
-                "time": None,
-                "descriptors": [],
-                "composers": [],
-                "publishers": matched_publishers,
-            }
-        )
+            context = canon_text[context_start:context_end]
+            if LOGO_RE.search(context) or _CONTEXT_EE_RE.search(context):
+                skipped_logo_matches += 1
+            else:
+                cues.append(
+                    {
+                        "seq": None,
+                        "title": raw_name,
+                        "usage": None,
+                        "time": None,
+                        "descriptors": [],
+                        "composers": [],
+                        "publishers": [{"name": raw_name}],
+                    }
+                )
+                matched_publishers_count += 1
+                seen_publishers.add(raw_name)
+                matched = True
+                break
+            start = idx + len(norm_name)
+        if matched and log_fn:
+            log_fn(f"default parser: matched_publisher={raw_name}")
     if log_fn:
         log_fn(
             "default parser: "
-            f"matched_lines={matched_lines} | skipped_context={skipped_context}"
+            f"matched_publishers={matched_publishers_count} | skipped_logo_matches={skipped_logo_matches}"
         )
     return cues
 
@@ -603,6 +615,31 @@ def filter_logos(cues: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
         title = cue.get("title", "") or ""
         usage = cue.get("usage")
         if usage == "EE" or LOGO_RE.search(title):
+            continue
+        out.append(cue)
+    return out
+
+
+def filter_logos_unknown_format(
+    cues: list[Dict[str, Any]],
+    *,
+    lookback: int = 3,
+) -> list[Dict[str, Any]]:
+    out: list[Dict[str, Any]] = []
+    for index, cue in enumerate(cues):
+        title = cue.get("title", "") or ""
+        usage = cue.get("usage")
+        if usage == "EE" or LOGO_RE.search(title):
+            continue
+        start = max(0, index - lookback)
+        should_skip = False
+        for prev in cues[start:index]:
+            prev_title = prev.get("title", "") or ""
+            prev_usage = prev.get("usage")
+            if prev_usage == "EE" or LOGO_RE.search(prev_title):
+                should_skip = True
+                break
+        if should_skip:
             continue
         out.append(cue)
     return out
@@ -1771,12 +1808,56 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "label": "Add header space",
                 "default": False,
             },
+            {
+                "id": "manual_select",
+                "type": "bool",
+                "label": "Choose pubs",
+                "default": False,
+            },
         ],
         payload_type=UserResponse,
     )
+
+    cat_code = payload["value"].lower()
+    if cat_code not in pubs.keys():
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Warning: Invalid Catalog",
+                "Info": f"The code {cat_code} does not exist.",
+            }
+        )
+        return
+
+    cat_object: List[dict] = pubs[cat_code]
+    con_pubs: List[str] = [entry["publisher"] for entry in cat_object]
+
     recursive = payload["recursive"]
     in_place = payload["in_place"]
     adjust_header = payload["adjust_header"]
+    manual_select = payload["manual_select"]
+
+    selected_pubs: list[str] = []
+    if manual_select and con_pubs:
+        selection_payload = api.request_input_json(
+            "Select controlled publishers",
+            id="ferp_process_cue_sheets_selected_pubs",
+            fields=[
+                {
+                    "id": "selected_pubs",
+                    "type": "multi_select",
+                    "label": f"Publisher catalog code: {cat_code.upper()}",
+                    "options": con_pubs,
+                    "default": [],
+                }
+            ],
+            show_text_input=False,
+            payload_type=PublisherSelectionResponse,
+        )
+        selected_pubs = selection_payload.get("selected_pubs", [])
+        if selected_pubs:
+            con_pubs = selected_pubs
+
     header_top_space = 50.0
     if adjust_header:
         header_response = api.request_input(
@@ -1806,19 +1887,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 }
             )
             return
-    cat_code = payload["value"].lower()
-    if cat_code not in pubs.keys():
-        api.emit_result(
-            {
-                "_status": "warn",
-                "_title": "Warning: Invalid Catalog",
-                "Info": f"The code {cat_code} does not exist.",
-            }
-        )
-        return
 
-    cat_object: List[dict] = pubs[cat_code]
-    con_pubs: List[str] = [entry["publisher"] for entry in cat_object]
     raw_cues = []
     temp_paths: list[Path] = []
 
@@ -1846,32 +1915,44 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     for index, pdf_path in enumerate(pdf_files, start=1):
         api.check_cancel()
         api.progress(current=index, total=total_files, unit="files")
-        fmt = detect_format(pdf_path)
-        if fmt == "soundmouse":
-            api.log("debug", f"{pdf_path.name}: detected Soundmouse format")
-            raw_cues = parse_soundmouse(pdf_path, check_cancel=api.check_cancel)
-        elif fmt == "rapidcue":
-            api.log("debug", f"{pdf_path.name}: detected RapidCue format")
-            raw_cues = parse_rapidcue(pdf_path, check_cancel=api.check_cancel)
+        if selected_pubs:
+            fmt = "manual"
+            raw_cues = []
+            filtered_cues = []
+            matched_publishers = selected_pubs
+            accuracy_audits = {}
         else:
-            api.log("debug", f"{pdf_path.name}: unknown format; using default parser")
-            raw_cues = parse_default(
-                pdf_path,
-                con_pubs,
-                log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
-                check_cancel=api.check_cancel,
-            )
+            fmt = detect_format(pdf_path)
+            if fmt == "soundmouse":
+                api.log("debug", f"{pdf_path.name}: detected Soundmouse format")
+                raw_cues = parse_soundmouse(pdf_path, check_cancel=api.check_cancel)
+            elif fmt == "rapidcue":
+                api.log("debug", f"{pdf_path.name}: detected RapidCue format")
+                raw_cues = parse_rapidcue(pdf_path, check_cancel=api.check_cancel)
+            else:
+                api.log(
+                    "debug", f"{pdf_path.name}: unknown format; using default parser"
+                )
+                raw_cues = parse_default(
+                    pdf_path,
+                    con_pubs,
+                    log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
+                    check_cancel=api.check_cancel,
+                )
 
-        api.check_cancel()
-        filtered_cues = filter_logos(raw_cues)
-        result = find_controlled_publishers_present(
-            filtered_cues,
-            con_pubs,
-            auto_match_threshold=0.92,
-            review_threshold=0.85,
-        )
-        matched_publishers = result.get("found_controlled_publishers", [])
-        accuracy_audits = result.get("evidence_by_controlled", {})
+            api.check_cancel()
+            if fmt == "unknown":
+                filtered_cues = raw_cues
+            else:
+                filtered_cues = filter_logos(raw_cues)
+            result = find_controlled_publishers_present(
+                filtered_cues,
+                con_pubs,
+                auto_match_threshold=0.92,
+                review_threshold=0.85,
+            )
+            matched_publishers = result.get("found_controlled_publishers", [])
+            accuracy_audits = result.get("evidence_by_controlled", {})
         if matched_publishers:
             xmp_bytes = build_xmp_publishers(matched_publishers)
             work_path = pdf_path
