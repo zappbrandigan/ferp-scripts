@@ -49,15 +49,20 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         payload_type=SayHello,
     )
     selection_payload = api.request_input_json(
-        "Select controlled publishers",
+        "Select Your Favorite Character",
         id="ferp_process_cue_sheets_selected_pubs",
         fields=[
             {
                 "id": "selections",
                 "type": "multi_select",
-                "label": "Test options",
-                "options": ["Zapp", "Fry", "Hubert"],
-                "default": ["Zapp"],
+                "label": "Character List:",
+                "options": [
+                    "Zapp Brannigan",
+                    "Phillip J. Fry",
+                    "Pofessor Hubert Farnsworh",
+                    "Dr. John Zoidberg",
+                ],
+                "default": [],
             }
         ],
         show_text_input=False,
