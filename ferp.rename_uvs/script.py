@@ -227,6 +227,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.emit_result(
         {
+            "_title": "Renaming Completed",
             "Renamed": renamed,
             "Skipped": skipped,
             "Needs OCR": needs_ocr,

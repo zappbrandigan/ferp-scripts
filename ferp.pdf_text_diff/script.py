@@ -21,6 +21,8 @@ def _resolve_input_path(target_dir: Path, raw_path: str) -> Path:
     path = Path(raw_path)
     if not path.is_absolute():
         path = target_dir / path
+    if path.suffix == "":
+        path = target_dir / path.with_suffix(".pdf")
     return path
 
 

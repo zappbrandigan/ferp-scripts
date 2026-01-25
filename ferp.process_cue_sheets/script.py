@@ -421,7 +421,7 @@ def rc_extract_lines(
                 lines.append(line)
     if log_fn:
         log_fn(f"rapidcue parser: pages={pages_scanned} | extracted_lines={len(lines)}")
-        log_fn(f"rapidcue parser: extracted_text={lines}")
+        # log_fn(f"rapidcue parser: extracted_text={lines}")
     return lines
 
 
