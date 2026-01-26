@@ -975,12 +975,16 @@ def find_controlled_publishers_present(
 def collect_pdfs(
     root: Path, recursive: bool, check_cancel: Callable[[], None] | None = None
 ) -> list[Path]:
+    def _is_in_underscore_dir(path: Path) -> bool:
+        return any(parent.name.startswith("_") for parent in path.parents)
+
     if recursive:
         files = []
         for path in root.rglob("*.pdf"):
             if check_cancel is not None:
                 check_cancel()
-            files.append(path)
+            if path.is_file() and not _is_in_underscore_dir(path):
+                files.append(path)
         return sorted(files)
     files = []
     for path in root.glob("*.pdf"):

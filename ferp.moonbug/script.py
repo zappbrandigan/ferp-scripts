@@ -161,11 +161,19 @@ def _is_in_named_dir(path: Path, dir_name: str) -> bool:
     return any(parent.name == dir_name for parent in path.parents)
 
 
+def _is_in_underscore_dir(path: Path) -> bool:
+    return any(parent.name.startswith("_") for parent in path.parents)
+
+
 def _collect_excel_files(root: Path, recursive: bool) -> list[Path]:
     if root.is_file():
         return [root]
     if recursive:
-        return sorted(path for path in root.rglob("*.xls*") if path.is_file())
+        return sorted(
+            path
+            for path in root.rglob("*.xls*")
+            if path.is_file() and not _is_in_underscore_dir(path)
+        )
     return sorted(path for path in root.glob("*.xls*") if path.is_file())
 
 

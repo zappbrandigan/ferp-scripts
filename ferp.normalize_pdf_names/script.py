@@ -93,7 +93,7 @@ def _iter_directory(
             for entry in entries:
                 if check_cancel is not None:
                     check_cancel()
-                if entry.name.startswith(".") or entry.name == "_check":
+                if entry.name.startswith(".") or entry.name.startswith("_"):
                     continue
                 try:
                     is_dir = entry.is_dir(follow_symlinks=False)
