@@ -45,7 +45,7 @@ def _extract_xmp(reader: PdfReader) -> str | None:
     return str(data)
 
 
-def _parse_xmp(xmp: str) -> dict[str, str]:
+def _parse_xmp(xmp: str) -> dict[str, object]:
     match = re.search(r"(<x:xmpmeta\b.*?</x:xmpmeta>)", xmp, re.DOTALL)
     xml_payload = match.group(1) if match else xmp
     try:
@@ -58,37 +58,122 @@ def _parse_xmp(xmp: str) -> dict[str, str]:
         "ferp": "https://tulbox.app/ferp/xmp/1.0",
     }
 
-    publishers = [
-        (li.text or "").strip()
-        for li in root.findall(".//ferp:publishers/rdf:Bag/rdf:li", ns)
-        if (li.text or "").strip()
-    ]
-
-    parsed: dict[str, str] = {}
-    if publishers:
+    parsed: dict[str, object] = {}
+    administrator = root.findtext(".//ferp:administrator", default="", namespaces=ns)
+    if administrator.strip():
         parsed["ferp:namespace"] = ns["ferp"]
-        parsed["ferp:publishers"] = "; ".join(publishers)
-        parsed["ferp:publishers_count"] = str(len(publishers))
+        parsed["ferp:administrator"] = administrator.strip()
+
+    agreements: list[dict[str, object]] = []
+    agreement_nodes = root.findall(".//ferp:agreements/rdf:Bag/rdf:li", ns)
+    for agreement_node in agreement_nodes:
+        publishers = [
+            (li.text or "").strip()
+            for li in agreement_node.findall(".//ferp:publishers/rdf:Bag/rdf:li", ns)
+            if (li.text or "").strip()
+        ]
+        effective_dates: list[dict[str, object]] = []
+        date_nodes = agreement_node.findall(".//ferp:effectiveDates/rdf:Seq/rdf:li", ns)
+        for date_node in date_nodes:
+            date_value = (
+                date_node.findtext("ferp:date", default="", namespaces=ns) or ""
+            ).strip()
+            territories = [
+                (li.text or "").strip()
+                for li in date_node.findall(".//ferp:territories/rdf:Bag/rdf:li", ns)
+                if (li.text or "").strip()
+            ]
+            if date_value or territories:
+                effective_dates.append({"date": date_value, "territories": territories})
+        if publishers or effective_dates:
+            agreements.append(
+                {
+                    "publishers": publishers,
+                    "effective_dates": effective_dates,
+                }
+            )
+
+    if agreements:
+        parsed["ferp:namespace"] = ns["ferp"]
+        parsed["ferp:agreements"] = agreements
 
     return parsed
 
 
-def _normalize_metadata(reader: PdfReader) -> dict[str, str]:
-    metadata = reader.metadata or {}
-    normalized: dict[str, str] = {}
-    for key, value in metadata.items():
-        label = str(key)
-        if label.startswith("/"):
-            label = label[1:]
-        normalized[label] = "" if value is None else str(value)
-    return normalized
+def _split_agreements_for_csv(metadata: dict[str, object]) -> list[dict[str, str]]:
+    administrator = str(metadata.get("ferp:administrator", "") or "")
+    agreements = metadata.get("ferp:agreements", [])
+    if not isinstance(agreements, list):
+        agreements = []
+    rows: list[dict[str, str]] = []
+    if not agreements:
+        rows.append(
+            {
+                "Administrator": administrator,
+                "Agreement": "",
+                "Publishers": "",
+                "Effective Date": "",
+                "Territories": "",
+            }
+        )
+        return rows
+    for index, agreement in enumerate(agreements, start=1):
+        if not isinstance(agreement, dict):
+            continue
+        publishers = agreement.get("publishers", [])
+        publisher_text = (
+            " | ".join(publishers) if isinstance(publishers, list) else str(publishers)
+        )
+        effective_dates = agreement.get("effective_dates", [])
+        if not isinstance(effective_dates, list):
+            effective_dates = []
+        if not effective_dates:
+            rows.append(
+                {
+                    "Administrator": administrator,
+                    "Agreement": str(index),
+                    "Publishers": publisher_text,
+                    "Effective Date": "",
+                    "Territories": "",
+                }
+            )
+            continue
+        for entry in effective_dates:
+            if not isinstance(entry, dict):
+                continue
+            date_value = str(entry.get("date", "") or "")
+            territories = entry.get("territories", [])
+            territory_text = (
+                " | ".join(territories)
+                if isinstance(territories, list)
+                else str(territories)
+            )
+            rows.append(
+                {
+                    "Administrator": administrator,
+                    "Agreement": str(index),
+                    "Publishers": publisher_text,
+                    "Effective Date": date_value,
+                    "Territories": territory_text,
+                }
+            )
+    return rows
 
 
 def _write_csv(csv_path: Path, rows: list[dict[str, str]]) -> None:
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(
-            handle, fieldnames=["File", "Relative Path", "Tag", "Value"]
+            handle,
+            fieldnames=[
+                "File",
+                "Relative Path",
+                "Administrator",
+                "Agreement",
+                "Publishers",
+                "Effective Date",
+                "Territories",
+            ],
         )
         writer.writeheader()
         writer.writerows(rows)
@@ -102,7 +187,38 @@ def _format_results(results: list[dict[str, object]]) -> str:
         lines.append(relative_path)
         if isinstance(metadata, dict) and metadata:
             for tag in sorted(metadata):
-                lines.append(f"  {tag}: {metadata[tag]}")
+                value = metadata[tag]
+                if tag == "ferp:agreements":
+                    if isinstance(value, list):
+                        lines.append("  ferp:agreements:")
+                        for agreement in value:
+                            if not isinstance(agreement, dict):
+                                lines.append(f"    - {agreement}")
+                                continue
+                            publishers = agreement.get("publishers", [])
+                            effective_dates = agreement.get("effective_dates", [])
+                            lines.append(
+                                f"    - publishers: {', '.join(publishers) if publishers else ''}"
+                            )
+                            if isinstance(effective_dates, list) and effective_dates:
+                                lines.append("      effective_dates:")
+                                for entry in effective_dates:
+                                    if not isinstance(entry, dict):
+                                        lines.append(f"        - {entry}")
+                                        continue
+                                    date_value = entry.get("date", "")
+                                    territories = entry.get("territories", [])
+                                    territory_text = (
+                                        ", ".join(territories)
+                                        if isinstance(territories, list)
+                                        else str(territories)
+                                    )
+                                    lines.append(
+                                        f"        - date: {date_value} | territories: {territory_text}"
+                                    )
+                            continue
+                        continue
+                lines.append(f"  {tag}: {value}")
         else:
             lines.append("  (no metadata)")
         lines.append("")
@@ -179,19 +295,17 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             continue
 
         api.check_cancel()
-        metadata = _normalize_metadata(reader)
+        metadata: dict[str, object] = {}
         xmp = _extract_xmp(reader)
         if xmp:
             parsed_xmp = _parse_xmp(xmp)
             if parsed_xmp:
-                metadata.update(parsed_xmp)
-            else:
-                metadata["XMP"] = xmp
+                metadata = parsed_xmp
         relative_path = str(pdf_path.relative_to(target_dir))
         if metadata:
             api.log("info", f"{relative_path}: {json.dumps(metadata, sort_keys=True)}")
         else:
-            api.log("info", f"{relative_path}: No metadata found")
+            api.log("info", f"{relative_path}: No FERP metadata found")
 
         results.append(
             {
@@ -207,19 +321,22 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     {
                         "File": pdf_path.name,
                         "Relative Path": relative_path,
-                        "Tag": "",
-                        "Value": "",
+                        "Administrator": "",
+                        "Agreement": "",
+                        "Publishers": "",
+                        "Effective Date": "",
+                        "Territories": "",
                     }
                 )
-            for tag, value in sorted(metadata.items()):
-                rows.append(
-                    {
-                        "File": pdf_path.name,
-                        "Relative Path": relative_path,
-                        "Tag": tag,
-                        "Value": value,
-                    }
-                )
+            else:
+                for row in _split_agreements_for_csv(metadata):
+                    rows.append(
+                        {
+                            "File": pdf_path.name,
+                            "Relative Path": relative_path,
+                            **row,
+                        }
+                    )
 
     csv_path: Path | None = None
     if write_csv:

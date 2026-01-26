@@ -12,7 +12,7 @@ import warnings
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypedDict
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict
 
 import pdfplumber
 from pdfplumber.page import Page
@@ -35,6 +35,7 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 LOGO_RE = re.compile(r"(?<![A-Z0-9])logos?(?![A-Z0-9])", re.IGNORECASE)
 _CONTEXT_EE_RE = re.compile(r"(?<![A-Z0-9])EE(?![A-Z0-9])")
+ADMINISTRATOR_NAME = "Universal Music Publishing"
 
 
 class UserResponse(TypedDict):
@@ -48,6 +49,16 @@ class UserResponse(TypedDict):
 class PublisherSelectionResponse(TypedDict):
     value: str
     selected_pubs: list[str]
+
+
+class EffectiveDateEntry(TypedDict):
+    date: str
+    territories: list[str]
+
+
+class AgreementEntry(TypedDict):
+    publishers: list[str]
+    effective_dates: list[EffectiveDateEntry]
 
 
 # =================================================
@@ -990,24 +1001,129 @@ def escape_xml(s: str) -> str:
     )
 
 
-def build_xmp_publishers(publishers: list[str]) -> bytes:
+def normalize_text_value(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def normalize_unique(values: list[str], *, sort: bool) -> list[str]:
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in values:
+        value = normalize_text_value(item)
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    if sort:
+        normalized.sort()
+    return normalized
+
+
+def split_territories(value: str) -> list[str]:
+    parts = [part for part in (value or "").split("/") if part is not None]
+    return normalize_unique(parts, sort=True)
+
+
+def normalize_effective_entries(rows: list[dict[str, str]]) -> list[EffectiveDateEntry]:
+    by_date: dict[str, set[str]] = {}
+    for row in rows:
+        date_value = normalize_text_value(row.get("effective date", ""))
+        if not date_value:
+            continue
+        try:
+            datetime.strptime(date_value, "%Y-%m-%d")
+        except ValueError:
+            continue
+        territories = split_territories(str(row.get("territory", "")))
+        if date_value not in by_date:
+            by_date[date_value] = set()
+        by_date[date_value].update(territories)
+
+    ordered: list[EffectiveDateEntry] = []
+    for date_value in sorted(by_date.keys()):
+        ordered.append(
+            {
+                "date": date_value,
+                "territories": sorted(by_date[date_value]),
+            }
+        )
+    return ordered
+
+
+def build_xmp_metadata(
+    administrator: str,
+    agreements: Sequence[AgreementEntry],
+) -> bytes:
     """
-    Build an XMP packet containing a custom ferp:publishers rdf:Bag.
+    Build an XMP packet containing ferp:administrator and ferp:agreements.
     Returns UTF-8 XML bytes.
     """
-    items = "\n".join(f"          <rdf:li>{escape_xml(p)}</rdf:li>" for p in publishers)
+    admin_value = normalize_text_value(administrator)
+    agreement_items: list[str] = []
+    for agreement in agreements:
+        publishers = normalize_unique(agreement.get("publishers", []), sort=False)
+        if not publishers:
+            continue
+        publisher_items = "\n".join(
+            f"                <rdf:li>{escape_xml(p)}</rdf:li>" for p in publishers
+        )
+        effective_entries = agreement.get("effective_dates", [])
+        effective_items: list[str] = []
+        for entry in effective_entries:
+            date_value = normalize_text_value(entry.get("date", ""))
+            if not date_value:
+                continue
+            territories = normalize_unique(entry.get("territories", []), sort=True)
+            territory_items = "\n".join(
+                f"                        <rdf:li>{escape_xml(t)}</rdf:li>"
+                for t in territories
+            )
+            effective_items.append(
+                f"""              <rdf:li rdf:parseType="Resource">
+                <ferp:date>{escape_xml(date_value)}</ferp:date>
+                <ferp:territories>
+                  <rdf:Bag>
+{territory_items}
+                  </rdf:Bag>
+                </ferp:territories>
+              </rdf:li>"""
+            )
+        effective_block = ""
+        if effective_items:
+            effective_block = (
+                "            <ferp:effectiveDates>\n"
+                "              <rdf:Seq>\n"
+                + "\n".join(effective_items)
+                + "\n              </rdf:Seq>\n"
+                "            </ferp:effectiveDates>\n"
+            )
+        agreement_items.append(
+            f"""      <rdf:li rdf:parseType="Resource">
+        <ferp:publishers>
+          <rdf:Bag>
+{publisher_items}
+          </rdf:Bag>
+        </ferp:publishers>
+{effective_block}      </rdf:li>"""
+        )
+
+    agreement_block = ""
+    if agreement_items:
+        agreement_block = (
+            "      <ferp:agreements>\n"
+            "        <rdf:Bag>\n"
+            + "\n".join(agreement_items)
+            + "\n        </rdf:Bag>\n"
+            "      </ferp:agreements>\n"
+        )
 
     xmp = f"""<?xpacket begin='' id='W5M0MpCehiHzreSzNTczkc9d'?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/">
   <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
     <rdf:Description
       xmlns:ferp="https://tulbox.app/ferp/xmp/1.0">
-      <ferp:publishers>
-        <rdf:Bag>
-{items}
-        </rdf:Bag>
-      </ferp:publishers>
-    </rdf:Description>
+      <ferp:administrator>{escape_xml(admin_value)}</ferp:administrator>
+{agreement_block}    </rdf:Description>
   </rdf:RDF>
 </x:xmpmeta>
 <?xpacket end='w'?>"""
@@ -1029,28 +1145,10 @@ def set_xmp_metadata(
         writer.add_page(page)
 
     info: dict[str, str] = {}
-    existing_keywords = ""
     if reader.metadata:
         for k, v in reader.metadata.items():
             if isinstance(k, str) and k.startswith("/") and v is not None:
                 info[k] = str(v)
-        existing_keywords = info.get("/Keywords", "")
-
-    publishers = []
-    try:
-        xmp_text = xmp_bytes.decode("utf-8", errors="replace")
-        publishers = re.findall(r"<rdf:li>(.*?)</rdf:li>", xmp_text, re.DOTALL)
-    except Exception:  # noqa: BLE001
-        publishers = []
-
-    if publishers:
-        cleaned = [p.strip() for p in publishers if p.strip()]
-        if cleaned:
-            suffix = "; ".join(cleaned)
-            if existing_keywords:
-                info["/Keywords"] = f"{existing_keywords}; {suffix}"
-            else:
-                info["/Keywords"] = suffix
 
     if info:
         writer.add_metadata(info)
@@ -1696,6 +1794,27 @@ def resolve_publisher_fields(
     return effective_date, territory
 
 
+def resolve_publisher_fields_raw(
+    matched_publishers: list[str],
+    category_entries: list[dict],
+) -> tuple[str, str]:
+    territory = ""
+    effective_date = ""
+    matched_set = {p.strip() for p in matched_publishers if p.strip()}
+    for entry in category_entries:
+        publisher = str(entry.get("publisher", "")).strip()
+        if publisher in matched_set:
+            territory_value = str(entry.get("territory", "")).strip()
+            if territory_value and not territory:
+                territory = territory_value
+            date_value = str(entry.get("effective date", "")).strip()
+            if date_value and not effective_date:
+                effective_date = date_value
+        if territory and effective_date:
+            break
+    return effective_date, territory
+
+
 def scale_from_top_space(top_space_pts: float) -> float:
     if top_space_pts <= 50:
         return 0.95
@@ -1808,6 +1927,31 @@ def resolve_multi_territory_rows(
                 }
             )
     return rows
+
+
+def build_agreements(
+    matched_publishers: list[str],
+    category_entries: list[dict],
+    multi_territory_rows: list[dict[str, str]],
+) -> list[AgreementEntry]:
+    if not matched_publishers:
+        return []
+    effective_rows = multi_territory_rows
+    if not effective_rows:
+        raw_date, raw_territory = resolve_publisher_fields_raw(
+            matched_publishers, category_entries
+        )
+        if raw_date or raw_territory:
+            effective_rows = [
+                {"effective date": raw_date, "territory": raw_territory}
+            ]
+    effective_entries = normalize_effective_entries(effective_rows)
+    return [
+        {
+            "publishers": matched_publishers,
+            "effective_dates": effective_entries,
+        }
+    ]
 
 
 @sdk.script
@@ -2001,7 +2145,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             matched_publishers = result.get("found_controlled_publishers", [])
             accuracy_audits = result.get("evidence_by_controlled", {})
         if matched_publishers:
-            xmp_bytes = build_xmp_publishers(matched_publishers)
             work_path = pdf_path
             if adjust_header:
                 temp_path = pdf_path.with_suffix(".header.tmp.pdf")
@@ -2018,6 +2161,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 matched_publishers,
                 cat_object,
             )
+            agreements = build_agreements(
+                matched_publishers,
+                cat_object,
+                multi_territory_rows,
+            )
+            xmp_bytes = build_xmp_metadata(ADMINISTRATOR_NAME, agreements)
             if in_place:
                 add_stamp(
                     work_path,
@@ -2050,8 +2199,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 )
             created_dirs.add("_stamped")
         else:
-            if adjust_header:
-                make_top_space_first_page_inplace(pdf_path, header_top_space)
             api.check_cancel()
             nop_dir = pdf_path.parent / "_nop"
             nop_dir.mkdir(exist_ok=True)
