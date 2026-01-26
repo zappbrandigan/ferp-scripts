@@ -506,7 +506,7 @@ def _run_async(factory: Callable[[], Coroutine[object, object, T]]) -> T:
 
 
 def _safe_rename(source: Path, target: Path) -> Path:
-    if source == target:
+    if source == target and source.name == target.name:
         return target
 
     if target.exists():

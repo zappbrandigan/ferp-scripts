@@ -1946,9 +1946,7 @@ def build_agreements(
             matched_publishers, category_entries
         )
         if raw_date or raw_territory:
-            effective_rows = [
-                {"effective date": raw_date, "territory": raw_territory}
-            ]
+            effective_rows = [{"effective date": raw_date, "territory": raw_territory}]
     effective_entries = normalize_effective_entries(effective_rows)
     return [
         {
@@ -2201,7 +2199,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     xmp_bytes,
                     check_cancel=api.check_cancel,
                 )
-            created_dirs.add("_stamped")
+                created_dirs.add("_stamped")
         else:
             api.check_cancel()
             nop_dir = pdf_path.parent / "_nop"
