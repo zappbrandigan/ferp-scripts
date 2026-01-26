@@ -98,7 +98,7 @@
     {
       "id": "ferp.normalize_pdf_names",
       "name": "Normalize: Cue Sheet Names",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "script": "scripts/ferp.normalize_pdf_names/script.py",
       "dependencies": [
         "googletrans==4.0.2",
