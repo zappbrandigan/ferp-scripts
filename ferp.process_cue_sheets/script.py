@@ -1930,6 +1930,16 @@ def resolve_multi_territory_rows(
                     "status": str(row.get("status", "")).strip(),
                 }
             )
+    def _sort_key(item: dict[str, str]) -> tuple[int, datetime | None, str, str]:
+        date_text = item.get("effective date", "")
+        try:
+            parsed = datetime.strptime(date_text, "%Y-%m-%d") if date_text else None
+        except ValueError:
+            parsed = None
+        has_date = 0 if parsed else 1
+        return (has_date, parsed, item.get("territory", ""), item.get("status", ""))
+
+    rows.sort(key=_sort_key)
     return rows
 
 
