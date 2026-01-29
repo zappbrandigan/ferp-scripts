@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -19,7 +20,6 @@ else:
 from unidecode import unidecode
 
 from ferp.fscp.scripts import sdk
-from ferp.resources.articles import language_articles
 
 MAX_FILENAME_LENGTH = 60
 PRODUCTION_DELIM = "   "
@@ -28,6 +28,8 @@ ELLIPSIS = ". . ."
 ELLIPSIS_LEN = len(ELLIPSIS)
 SPACE_RUN_RE = re.compile(r"( {2,})")
 T = TypeVar("T")
+_ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+_ARTICLES_PATH = _ASSETS_DIR / "articles.json"
 _ASCII_PUNCT_TRANSLATION = str.maketrans(
     {
         "\u2018": "'",
@@ -46,15 +48,49 @@ _ARTICLE_MATCH_TRANSLATION = str.maketrans(
         "\u2019": "'",
     }
 )
-_ARTICLE_TOKENS = {
-    article.lower() for articles in language_articles.values() for article in articles
-}
-_ARTICLE_PREFIXES = tuple(
-    article.lower()
-    for articles in language_articles.values()
-    for article in articles
-    if article.endswith("'")
-)
+
+
+@lru_cache(maxsize=1)
+def _load_language_articles() -> dict[str, list[str]]:
+    try:
+        raw = _ARTICLES_PATH.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    cleaned: dict[str, list[str]] = {}
+    for key, value in data.items():
+        if not isinstance(key, str):
+            continue
+        if not isinstance(value, list):
+            continue
+        if not all(isinstance(item, str) for item in value):
+            continue
+        cleaned[key] = value
+    return cleaned
+
+
+@lru_cache(maxsize=1)
+def _article_tokens() -> set[str]:
+    return {
+        article.lower()
+        for articles in _load_language_articles().values()
+        for article in articles
+    }
+
+
+@lru_cache(maxsize=1)
+def _article_prefixes() -> tuple[str, ...]:
+    return tuple(
+        article.lower()
+        for articles in _load_language_articles().values()
+        for article in articles
+        if article.endswith("'")
+    )
 
 
 class UserResponse(TypedDict):
@@ -419,6 +455,7 @@ def _detect_language(text: str) -> str | None:
     lang = getattr(result, "lang", None)
     if not isinstance(lang, str):
         return None
+    language_articles = _load_language_articles()
     if lang not in language_articles:
         return None
     return lang
@@ -430,9 +467,9 @@ def _has_candidate_article(text: str) -> bool:
         return False
     first = tokens[0]
     normalized = first.translate(_ARTICLE_MATCH_TRANSLATION).lower()
-    if normalized in _ARTICLE_TOKENS:
+    if normalized in _article_tokens():
         return True
-    return any(normalized.startswith(prefix) for prefix in _ARTICLE_PREFIXES)
+    return any(normalized.startswith(prefix) for prefix in _article_prefixes())
 
 
 def _reposition_article(text: str) -> str:
@@ -440,6 +477,7 @@ def _reposition_article(text: str) -> str:
     if not lang:
         return text
 
+    language_articles = _load_language_articles()
     articles = language_articles.get(lang, [])
     tokens = text.split()
     if not tokens:

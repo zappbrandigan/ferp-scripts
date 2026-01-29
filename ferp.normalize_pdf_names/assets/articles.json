@@ -1,0 +1,16 @@
+{
+  "en": ["a", "an", "the"],
+  "es": ["el", "la", "lo", "los", "las", "un", "una", "unos", "unas"],
+  "fr": ["le", "la", "les", "un", "une", "l'"],
+  "de": ["der", "die", "das", "ein", "eine"],
+  "it": ["il", "lo", "la", "i", "gli", "le", "un", "uno", "una", "un'", "l'"],
+  "pt": ["o", "a", "os", "as", "um", "uma", "uns", "umas"],
+  "nl": ["de", "het", "een"],
+  "sv": ["en", "ett"],
+  "no": ["en", "ei", "et"],
+  "da": ["en", "et"],
+  "ro": ["un", "o", "niște"],
+  "hu": ["a", "az", "egy"],
+  "tr": ["bir"],
+  "el": ["ο", "η", "το", "ένας", "μία", "ένα"]
+}

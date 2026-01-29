@@ -51,6 +51,12 @@ class PublisherSelectionResponse(TypedDict):
     selected_pubs: list[str]
 
 
+class SplitTerritorySelectionResponse(TypedDict):
+    value: str
+    territory_codes: list[str]
+    use_default_split_selection: bool
+
+
 class EffectiveDateEntry(TypedDict):
     date: str
     territories: list[str]
@@ -329,7 +335,7 @@ RC_CUE_HEADER_RE = re.compile(
 )
 
 # Role line start (after descriptor peeling)
-RC_ROLE_START_RE = re.compile(r"^(C|A|CA|AR|E)\s+(.+)$")
+RC_ROLE_START_RE = re.compile(r"^(C|A|CA|AR|E|AM)\s+(.+)$")
 
 # Extract society + percent from END of role block
 RC_SOCIETY_PERCENT_RE = re.compile(r"(.*?)\s+([A-Z]+)\s+(\d+(?:\.\d+)?)$")
@@ -548,6 +554,7 @@ def parse_rapidcue(
 
     if log_fn:
         log_fn(f"rapidcue parser: cues={len(cues)}")
+        # log_fn(f"rapidcue parser: cues={cues}")
     return cues
 
 
@@ -1217,220 +1224,220 @@ def wrap_text(text: str, font_name: str, font_size: float, max_width: float):
     return lines
 
 
-def draw_top_right_badge(
-    c: canvas.Canvas,
-    page_w: float,
-    page_h: float,
-    *,
-    second_line_text: str,  # dynamic line immediately after the fixed first line
-    deal_start_date_text: str,  # dynamic value for "Deal Start Date" right column
-    controlled_territory_text: str,  # dynamic value for "Controlled Territory" right column (wraps)
-    image_path: str,
-    margin_right: float = 5,
-    margin_top: float = 5,
-    padding: float = 5,
-    gap: float = 5,
-    image_w: float = 65,
-    image_h: float = 45,
-    top_font_name: str = "Calibri Bold",
-    bottom_font_name: str = "Calibri",
-    top_font_size: float = 8,
-    bottom_font_size: float = 6,
-    top_line_height: float = 8,
-    top_line_gap: float = 2.0,  # extra vertical space between top line 1 and line 2
-    bottom_line_height: float = 7.5,
-    max_text_width: float = 170,  # max width for ALL text area to the right of the image
-    min_text_width: float = 170,  # minimum width for ALL text area to the right of the image
-    corner_radius: float = 5,
-    stroke_rgb=(0, 0, 0),
-    stroke_width: float = 1.0,
-    # Horizontal rule styling / spacing
-    rule_thickness: float = 0.75,
-    rule_rgb=(0, 0, 0),
-    rule_margin_top: float = 4,
-    rule_margin_bottom: float = 1,
-    # Two-column layout controls (below divider)
-    col_gap: float = 20,  # space between left and right "columns"
-    min_right_col_width: float = 40,  # ensures a sane wrap width even if left labels are wide
-):
-    """
-    Draws a rounded-rectangle badge anchored to the top-right corner.
-    The rounded rectangle has a fully transparent background (fill=0) and a stroke.
+# def draw_top_right_badge(
+#     c: canvas.Canvas,
+#     page_w: float,
+#     page_h: float,
+#     *,
+#     second_line_text: str,  # dynamic line immediately after the fixed first line
+#     deal_start_date_text: str,  # dynamic value for "Deal Start Date" right column
+#     controlled_territory_text: str,  # dynamic value for "Controlled Territory" right column (wraps)
+#     image_path: str,
+#     margin_right: float = 5,
+#     margin_top: float = 5,
+#     padding: float = 5,
+#     gap: float = 5,
+#     image_w: float = 65,
+#     image_h: float = 45,
+#     top_font_name: str = "Calibri Bold",
+#     bottom_font_name: str = "Calibri",
+#     top_font_size: float = 8,
+#     bottom_font_size: float = 6,
+#     top_line_height: float = 8,
+#     top_line_gap: float = 2.0,  # extra vertical space between top line 1 and line 2
+#     bottom_line_height: float = 7.5,
+#     max_text_width: float = 170,  # max width for ALL text area to the right of the image
+#     min_text_width: float = 170,  # minimum width for ALL text area to the right of the image
+#     corner_radius: float = 5,
+#     stroke_rgb=(0, 0, 0),
+#     stroke_width: float = 1.0,
+#     # Horizontal rule styling / spacing
+#     rule_thickness: float = 0.75,
+#     rule_rgb=(0, 0, 0),
+#     rule_margin_top: float = 4,
+#     rule_margin_bottom: float = 1,
+#     # Two-column layout controls (below divider)
+#     col_gap: float = 20,  # space between left and right "columns"
+#     min_right_col_width: float = 40,  # ensures a sane wrap width even if left labels are wide
+# ):
+#     """
+#     Draws a rounded-rectangle badge anchored to the top-right corner.
+#     The rounded rectangle has a fully transparent background (fill=0) and a stroke.
 
-    Layout (right of image):
-      Line 1 (fixed):  "Universal Music Publishing admin o/b/o"
-      Line 2 (dynamic): second_line_text (can wrap to multiple lines)
-      Divider line
-      Row 1:  "Deal Start Date"       <deal_start_date_text>
-      Row 2:  "Controlled Territory"  <controlled_territory_text>  (wraps within right column)
+#     Layout (right of image):
+#       Line 1 (fixed):  "Universal Music Publishing admin o/b/o"
+#       Line 2 (dynamic): second_line_text (can wrap to multiple lines)
+#       Divider line
+#       Row 1:  "Deal Start Date"       <deal_start_date_text>
+#       Row 2:  "Controlled Territory"  <controlled_territory_text>  (wraps within right column)
 
-    Notes:
-    - The box width is controlled by max_text_width/min_text_width (text area width).
-    - Controlled territory wraps within the right column and will NOT expand the box width.
-    - Wrapping is word-based only.
-    """
+#     Notes:
+#     - The box width is controlled by max_text_width/min_text_width (text area width).
+#     - Controlled territory wraps within the right column and will NOT expand the box width.
+#     - Wrapping is word-based only.
+#     """
 
-    fixed_line_1 = "Universal Music Publishing admin o/b/o"
-    left_label_1 = "Deal Start Date"
-    left_label_2 = "Controlled Territory"
+#     fixed_line_1 = "Universal Music Publishing admin o/b/o"
+#     left_label_1 = "Deal Start Date"
+#     left_label_2 = "Controlled Territory"
 
-    # --- Column widths (below divider) --- (measured in bottom font size)
-    left_col_w = max(
-        pdfmetrics.stringWidth(left_label_1, bottom_font_name, bottom_font_size),
-        pdfmetrics.stringWidth(left_label_2, bottom_font_name, bottom_font_size),
-    )
+#     # --- Column widths (below divider) --- (measured in bottom font size)
+#     left_col_w = max(
+#         pdfmetrics.stringWidth(left_label_1, bottom_font_name, bottom_font_size),
+#         pdfmetrics.stringWidth(left_label_2, bottom_font_name, bottom_font_size),
+#     )
 
-    # --- Decide overall text area width (right of image) ---
-    # Start by clamping the total text area width to min/max.
-    text_area_w = max(min_text_width, min(max_text_width, max_text_width))
+#     # --- Decide overall text area width (right of image) ---
+#     # Start by clamping the total text area width to min/max.
+#     text_area_w = max(min_text_width, min(max_text_width, max_text_width))
 
-    # Ensure we always have room for the right column; if not, expand text area to accommodate minimum right col.
-    # Note: expanding may exceed max_text_width;
-    min_total_for_cols = left_col_w + col_gap + min_right_col_width
-    if text_area_w < min_total_for_cols:
-        text_area_w = min_total_for_cols
+#     # Ensure we always have room for the right column; if not, expand text area to accommodate minimum right col.
+#     # Note: expanding may exceed max_text_width;
+#     min_total_for_cols = left_col_w + col_gap + min_right_col_width
+#     if text_area_w < min_total_for_cols:
+#         text_area_w = min_total_for_cols
 
-    right_col_w = max(text_area_w - left_col_w - col_gap, min_right_col_width)
+#     right_col_w = max(text_area_w - left_col_w - col_gap, min_right_col_width)
 
-    # --- Wrap top block (2 lines) ---
-    top_line_1 = fixed_line_1
-    top_line_2_lines = wrap_text(
-        second_line_text, top_font_name, top_font_size, text_area_w
-    )
+#     # --- Wrap top block (2 lines) ---
+#     top_line_1 = fixed_line_1
+#     top_line_2_lines = wrap_text(
+#         second_line_text, top_font_name, top_font_size, text_area_w
+#     )
 
-    # --- Wrap right-column values for the two rows (below divider) ---
-    deal_date_lines = wrap_text(
-        deal_start_date_text, bottom_font_name, bottom_font_size, right_col_w
-    )
-    territory_lines = wrap_text(
-        controlled_territory_text, bottom_font_name, bottom_font_size, right_col_w
-    )
+#     # --- Wrap right-column values for the two rows (below divider) ---
+#     deal_date_lines = wrap_text(
+#         deal_start_date_text, bottom_font_name, bottom_font_size, right_col_w
+#     )
+#     territory_lines = wrap_text(
+#         controlled_territory_text, bottom_font_name, bottom_font_size, right_col_w
+#     )
 
-    # --- Heights: compute using separate line heights ---
-    top_block_h = (
-        top_line_height  # first fixed line
-        + top_line_gap  # adjustable gap
-        + top_line_height * max(len(top_line_2_lines), 1)
-    )
+#     # --- Heights: compute using separate line heights ---
+#     top_block_h = (
+#         top_line_height  # first fixed line
+#         + top_line_gap  # adjustable gap
+#         + top_line_height * max(len(top_line_2_lines), 1)
+#     )
 
-    row1_h = bottom_line_height * max(len(deal_date_lines), 1)
-    row2_h = bottom_line_height * max(len(territory_lines), 1)
+#     row1_h = bottom_line_height * max(len(deal_date_lines), 1)
+#     row2_h = bottom_line_height * max(len(territory_lines), 1)
 
-    text_stack_h = (
-        top_block_h
-        + rule_margin_top
-        + rule_thickness
-        + rule_margin_bottom
-        + row1_h
-        + row2_h
-    )
+#     text_stack_h = (
+#         top_block_h
+#         + rule_margin_top
+#         + rule_thickness
+#         + rule_margin_bottom
+#         + row1_h
+#         + row2_h
+#     )
 
-    # --- Compute container size ---
-    content_w = image_w + gap + text_area_w
-    content_h = max(image_h, text_stack_h)
+#     # --- Compute container size ---
+#     content_w = image_w + gap + text_area_w
+#     content_h = max(image_h, text_stack_h)
 
-    rect_w = content_w + 2 * padding
-    rect_h = content_h + 2 * padding
+#     rect_w = content_w + 2 * padding
+#     rect_h = content_h + 2 * padding
 
-    r = min(corner_radius, rect_w / 2, rect_h / 2)
+#     r = min(corner_radius, rect_w / 2, rect_h / 2)
 
-    rect_x = page_w - margin_right - rect_w
-    rect_y = page_h - margin_top - rect_h
+#     rect_x = page_w - margin_right - rect_w
+#     rect_y = page_h - margin_top - rect_h
 
-    c.saveState()
+#     c.saveState()
 
-    # Stroke-only rounded rect (transparent background)
-    c.setLineWidth(stroke_width)
-    c.setStrokeColorRGB(*stroke_rgb)
-    c.roundRect(rect_x, rect_y, rect_w, rect_h, r, stroke=1, fill=0)
+#     # Stroke-only rounded rect (transparent background)
+#     c.setLineWidth(stroke_width)
+#     c.setStrokeColorRGB(*stroke_rgb)
+#     c.roundRect(rect_x, rect_y, rect_w, rect_h, r, stroke=1, fill=0)
 
-    # Vertically center the full text stack in the available content height
-    text_stack_bottom = rect_y + padding + (content_h - text_stack_h) / 2
-    text_stack_top = text_stack_bottom + text_stack_h
+#     # Vertically center the full text stack in the available content height
+#     text_stack_bottom = rect_y + padding + (content_h - text_stack_h) / 2
+#     text_stack_top = text_stack_bottom + text_stack_h
 
-    # Image aligned to top, matching first text line
-    img_x = rect_x + padding
-    img_y = text_stack_top - image_h
+#     # Image aligned to top, matching first text line
+#     img_x = rect_x + padding
+#     img_y = text_stack_top - image_h
 
-    img = ImageReader(image_path)
-    c.drawImage(img, img_x, img_y, width=image_w, height=image_h, mask="auto")
+#     img = ImageReader(image_path)
+#     c.drawImage(img, img_x, img_y, width=image_w, height=image_h, mask="auto")
 
-    # Text origin
-    text_x = img_x + image_w + gap
+#     # Text origin
+#     text_x = img_x + image_w + gap
 
-    # Baseline offsets for each font size / line height
-    top_baseline_offset = (top_line_height - top_font_size) * 0.8
-    bottom_baseline_offset = (bottom_line_height - bottom_font_size) * 0.8
+#     # Baseline offsets for each font size / line height
+#     top_baseline_offset = (top_line_height - top_font_size) * 0.8
+#     bottom_baseline_offset = (bottom_line_height - bottom_font_size) * 0.8
 
-    c.setFillColorRGB(0, 0, 0)
-    cursor_y = text_stack_top
-    # ---- Top block (top font size) ----
-    c.setFont(top_font_name, top_font_size)
+#     c.setFillColorRGB(0, 0, 0)
+#     cursor_y = text_stack_top
+#     # ---- Top block (top font size) ----
+#     c.setFont(top_font_name, top_font_size)
 
-    # Line 1 (fixed)
-    cursor_y -= top_line_height
-    c.drawString(text_x, cursor_y + top_baseline_offset, top_line_1)
+#     # Line 1 (fixed)
+#     cursor_y -= top_line_height
+#     c.drawString(text_x, cursor_y + top_baseline_offset, top_line_1)
 
-    # Adjustable gap between line 1 and line 2
-    cursor_y -= top_line_gap
+#     # Adjustable gap between line 1 and line 2
+#     cursor_y -= top_line_gap
 
-    # Line 2 (dynamic, wrapped)
-    for line in top_line_2_lines:
-        cursor_y -= top_line_height
-        c.drawString(text_x, cursor_y + top_baseline_offset, line)
+#     # Line 2 (dynamic, wrapped)
+#     for line in top_line_2_lines:
+#         cursor_y -= top_line_height
+#         c.drawString(text_x, cursor_y + top_baseline_offset, line)
 
-    # ---- Divider ----
-    cursor_y -= rule_margin_top
-    c.saveState()
-    c.setLineWidth(rule_thickness)
-    c.setStrokeColorRGB(*rule_rgb)
-    c.line(text_x, cursor_y, text_x + text_area_w, cursor_y)
-    c.restoreState()
-    cursor_y -= rule_thickness + rule_margin_bottom
+#     # ---- Divider ----
+#     cursor_y -= rule_margin_top
+#     c.saveState()
+#     c.setLineWidth(rule_thickness)
+#     c.setStrokeColorRGB(*rule_rgb)
+#     c.line(text_x, cursor_y, text_x + text_area_w, cursor_y)
+#     c.restoreState()
+#     cursor_y -= rule_thickness + rule_margin_bottom
 
-    # ---- Two-column rows (bottom font size) ----
-    c.setFont(bottom_font_name, bottom_font_size)
+#     # ---- Two-column rows (bottom font size) ----
+#     c.setFont(bottom_font_name, bottom_font_size)
 
-    left_x = text_x
-    right_x = text_x + left_col_w + col_gap
+#     left_x = text_x
+#     right_x = text_x + left_col_w + col_gap
 
-    # Row 1: Deal Start Date
-    cursor_y -= bottom_line_height
-    c.drawString(left_x, cursor_y + bottom_baseline_offset, left_label_1)
-    c.drawString(
-        right_x,
-        cursor_y + bottom_baseline_offset,
-        deal_date_lines[0] if deal_date_lines else "",
-    )
-    for extra in deal_date_lines[1:] if deal_date_lines else []:
-        cursor_y -= bottom_line_height
-        c.drawString(right_x, cursor_y + bottom_baseline_offset, extra)
+#     # Row 1: Deal Start Date
+#     cursor_y -= bottom_line_height
+#     c.drawString(left_x, cursor_y + bottom_baseline_offset, left_label_1)
+#     c.drawString(
+#         right_x,
+#         cursor_y + bottom_baseline_offset,
+#         deal_date_lines[0] if deal_date_lines else "",
+#     )
+#     for extra in deal_date_lines[1:] if deal_date_lines else []:
+#         cursor_y -= bottom_line_height
+#         c.drawString(right_x, cursor_y + bottom_baseline_offset, extra)
 
-    # Row 2: Controlled Territory
-    cursor_y -= bottom_line_height
-    c.drawString(left_x, cursor_y + bottom_baseline_offset, left_label_2)
-    c.drawString(
-        right_x,
-        cursor_y + bottom_baseline_offset,
-        territory_lines[0] if territory_lines else "",
-    )
-    for extra in territory_lines[1:] if territory_lines else []:
-        cursor_y -= bottom_line_height
-        c.drawString(right_x, cursor_y + bottom_baseline_offset, extra)
+#     # Row 2: Controlled Territory
+#     cursor_y -= bottom_line_height
+#     c.drawString(left_x, cursor_y + bottom_baseline_offset, left_label_2)
+#     c.drawString(
+#         right_x,
+#         cursor_y + bottom_baseline_offset,
+#         territory_lines[0] if territory_lines else "",
+#     )
+#     for extra in territory_lines[1:] if territory_lines else []:
+#         cursor_y -= bottom_line_height
+#         c.drawString(right_x, cursor_y + bottom_baseline_offset, extra)
 
-    c.restoreState()
+#     c.restoreState()
 
-    return {
-        "rect": (rect_x, rect_y, rect_w, rect_h),
-        "image": (img_x, img_y, image_w, image_h),
-        "text_area": (text_x, text_stack_bottom, text_area_w, text_stack_h),
-        "columns": {"left_w": left_col_w, "right_w": right_col_w, "gap": col_gap},
-        "top_block": {"line1": top_line_1, "line2_lines": top_line_2_lines},
-        "rows": {
-            "deal_start_date_lines": deal_date_lines,
-            "territory_lines": territory_lines,
-        },
-    }
+#     return {
+#         "rect": (rect_x, rect_y, rect_w, rect_h),
+#         "image": (img_x, img_y, image_w, image_h),
+#         "text_area": (text_x, text_stack_bottom, text_area_w, text_stack_h),
+#         "columns": {"left_w": left_col_w, "right_w": right_col_w, "gap": col_gap},
+#         "top_block": {"line1": top_line_1, "line2_lines": top_line_2_lines},
+#         "rows": {
+#             "deal_start_date_lines": deal_date_lines,
+#             "territory_lines": territory_lines,
+#         },
+#     }
 
 
 def draw_top_full_badge(
@@ -1439,38 +1446,38 @@ def draw_top_full_badge(
     page_h: float,
     *,
     second_line_text: str,  # dynamic line immediately after the fixed first line
-    deal_start_date_and_territory: list[dict[str, str]],
-    image_path: str,
-    margin_right: float = 8,
-    margin_top: float = 8,
-    padding: float = 5,
-    gap: float = 5,
-    image_w: float = 65,
-    image_h: float = 45,
+    deal_start_date_and_territory: list[dict[str, str]],  # row data for table
+    image_path: str,  # logo image file path
+    image_y_offset: float = 1.5,  # vertical adjustment for image position
+    margin_right: float = 8,  # distance from page right edge to badge
+    margin_top: float = 8,  # distance from page top edge to badge
+    padding: float = 5,  # inner padding around image + text
+    gap: float = 8,  # space between image and text area
+    image_w: float = 60,  # logo width in points
+    image_h: float = 33,  # logo height in points
     # Fonts
-    top_font_name: str = "Calibri Bold",
-    bottom_font_name: str = "Calibri",
-    top_font_size: float = 8,
-    bottom_font_size: float = 6,
+    top_font_name: str = "Calibri Bold",  # font for top two lines
+    bottom_font_name: str = "Calibri",  # font for table rows
+    top_font_size: float = 7,  # size for top two lines
+    bottom_font_size: float = 6,  # size for table rows
     # Line metrics
-    top_line_height: float = 8,
+    top_line_height: float = 7,  # line height for top two lines
     top_line_gap: float = 4.0,  # extra vertical space between top line 1 and line 2
-    bottom_line_height: float = 7.5,
-    # Width controls (this stamp is intended to be "full width" of the header area)
-    max_text_width: float = 500,  # max width for ALL text area to the right of the image
-    min_text_width: float = 500,  # minimum width for ALL text area to the right of the image
-    corner_radius: float = 5,
-    stroke_rgb=(0, 0, 0),
-    stroke_width: float = 1.0,
+    bottom_line_height: float = 7.5,  # line height for table rows
+    max_text_width: float = 500,  # max width for all text area right of image
+    min_text_width: float = 150,  # min width for all text area right of image
+    corner_radius: float = 5,  # rounded rectangle corner radius
+    stroke_rgb=(0, 0, 0),  # badge outline color
+    stroke_width: float = 1.0,  # badge outline width
     # Horizontal rule styling / spacing
-    rule_thickness: float = 0.75,
-    rule_rgb=(0, 0, 0),
-    rule_margin_top: float = 4,
-    rule_margin_bottom: float = 1,
+    rule_thickness: float = 0.75,  # divider line thickness
+    rule_rgb=(0, 0, 0),  # divider line color
+    rule_margin_top: float = 4,  # space above divider
+    rule_margin_bottom: float = 1,  # space below divider
     # Table layout (below divider)
     col_gap: float = 20,  # space between the two columns
-    min_right_col_width: float = 40,
-    header_bottom_gap: float = 2.0,  # space between column header row and first data row
+    min_right_col_width: float = 40,  # min width for territory column
+    header_bottom_gap: float = 0,  # space between header row and first data row
 ):
     """
     Draws a rounded-rectangle badge anchored to the top-right corner.
@@ -1486,7 +1493,7 @@ def draw_top_full_badge(
                         ...
 
     Notes:
-    - This function uses a fixed text-area width governed by min_text_width/max_text_width (often equal).
+    - This function uses a fixed text-area width governed by min_text_width/max_text_width.
     - Territory wrapping is constrained to the right column and does not widen the box.
     - Wrapping is word-based only.
     """
@@ -1495,16 +1502,25 @@ def draw_top_full_badge(
     col_header_1 = "Deal Start Date"
     col_header_2 = "Controlled Territory"
 
-    # --- Decide overall text area width (right of image) ---
-    # Clamp total text area width to [min_text_width, max_text_width].
-    # Defaults set them equal to create a fixed width.
-    text_area_w = max(min_text_width, min(max_text_width, max_text_width))
-
     # --- Column widths (below divider) ---
     # Left column width must fit the header and typical date text
     left_col_w = pdfmetrics.stringWidth(
         col_header_1, bottom_font_name, bottom_font_size
     )
+
+    # --- Measure territory text to allow a narrower box when strings are short ---
+    max_territory_w = min_right_col_width
+    for row in deal_start_date_and_territory or []:
+        territory = str(row.get("territory", "") or "")
+        if not territory:
+            continue
+        text_w = pdfmetrics.stringWidth(territory, bottom_font_name, bottom_font_size)
+        if text_w > max_territory_w:
+            max_territory_w = text_w
+
+    # --- Decide overall text area width (right of image) ---
+    desired_text_area_w = left_col_w + col_gap + max_territory_w
+    text_area_w = max(min_text_width, min(max_text_width, desired_text_area_w))
 
     # Ensure at least min_right_col_width remains for territory, otherwise expand the text area.
     min_total_for_cols = left_col_w + col_gap + min_right_col_width
@@ -1591,7 +1607,7 @@ def draw_top_full_badge(
 
     # Image aligned to top, matching first text line
     img_x = rect_x + padding
-    img_y = text_stack_top - image_h
+    img_y = text_stack_top - image_h - image_y_offset
     img = ImageReader(image_path)
     c.drawImage(img, img_x, img_y, width=image_w, height=image_h, mask="auto")
 
@@ -1676,8 +1692,6 @@ def add_stamp(
     pdf_path: Path,
     output_path: Path,
     matched_publishers: list[str],
-    deal_start_date_text: str,
-    controlled_territory_text: str,
     multi_territory_rows: list[dict[str, str]],
 ) -> None:
     font_path_b = Path(__file__).resolve().parent / "assets" / "Calibrib.ttf"
@@ -1699,25 +1713,14 @@ def add_stamp(
 
     c = canvas.Canvas(str(temp_path), pagesize=(page_w, page_h))
 
-    if multi_territory_rows:
-        draw_top_full_badge(
-            c,
-            page_w,
-            page_h,
-            second_line_text=" and ".join(matched_publishers),
-            deal_start_date_and_territory=multi_territory_rows,
-            image_path=str(logo_path),
-        )
-    else:
-        draw_top_right_badge(
-            c,
-            page_w,
-            page_h,
-            second_line_text=" and ".join(matched_publishers),
-            deal_start_date_text=deal_start_date_text,
-            controlled_territory_text=controlled_territory_text,
-            image_path=str(logo_path),
-        )
+    draw_top_full_badge(
+        c,
+        page_w,
+        page_h,
+        second_line_text=" and ".join(matched_publishers),
+        deal_start_date_and_territory=multi_territory_rows,
+        image_path=str(logo_path),
+    )
 
     c.showPage()
     c.save()
@@ -1775,27 +1778,6 @@ def format_effective_date(date_text: str) -> str:
     except ValueError:
         return "N/A"
     return f"{dt.day} {dt.strftime('%B')} {dt.year}"
-
-
-def resolve_publisher_fields(
-    matched_publishers: list[str],
-    category_entries: list[dict],
-) -> tuple[str, str]:
-    territory = "N/A"
-    effective_date = "N/A"
-    matched_set = {p.strip() for p in matched_publishers if p.strip()}
-    for entry in category_entries:
-        publisher = str(entry.get("publisher", "")).strip()
-        if publisher in matched_set:
-            territory_value = str(entry.get("territory", "")).strip()
-            if territory_value and territory == "N/A":
-                territory = territory_value
-            date_value = str(entry.get("effective date", "")).strip()
-            if date_value and effective_date == "N/A":
-                effective_date = format_effective_date(date_value)
-        if territory != "N/A" and effective_date != "N/A":
-            break
-    return effective_date, territory
 
 
 def resolve_publisher_fields_raw(
@@ -1901,6 +1883,9 @@ def make_top_space_first_page_inplace(
 def resolve_multi_territory_rows(
     matched_publishers: list[str],
     category_entries: list[dict],
+    *,
+    territory_key: str = "multi_territory",
+    selected_codes: set[str] | None = None,
 ) -> list[dict[str, str]]:
     matched_set = {p.strip() for p in matched_publishers if p.strip()}
     rows: list[dict[str, str]] = []
@@ -1909,12 +1894,16 @@ def resolve_multi_territory_rows(
         publisher = str(entry.get("publisher", "")).strip()
         if publisher not in matched_set:
             continue
-        multi_territory = entry.get("multi_territory") or []
-        if not isinstance(multi_territory, list):
+        territory_rows = entry.get(territory_key) or []
+        if not isinstance(territory_rows, list):
             continue
-        for row in multi_territory:
+        for row in territory_rows:
             if not isinstance(row, dict):
                 continue
+            if selected_codes is not None:
+                code = str(row.get("territory_code", "")).strip()
+                if not code or code not in selected_codes:
+                    continue
             effective_date = str(row.get("effective date", "")).strip()
             territory = str(row.get("territory", "")).strip()
             if not (effective_date or territory):
@@ -1930,6 +1919,7 @@ def resolve_multi_territory_rows(
                     "status": str(row.get("status", "")).strip(),
                 }
             )
+
     def _sort_key(item: dict[str, str]) -> tuple[int, datetime | None, str, str]:
         date_text = item.get("effective date", "")
         try:
@@ -1941,6 +1931,72 @@ def resolve_multi_territory_rows(
 
     rows.sort(key=_sort_key)
     return rows
+
+
+def normalize_territory_mode(value: str) -> str:
+    normalized = (value or "").strip()
+    if normalized.lower() == "multiple":
+        return "multiple"
+    if normalized.lower() == "split":
+        return "split"
+    return "single"
+
+
+def resolve_territory_mode(
+    matched_publishers: list[str],
+    category_entries: list[dict],
+) -> str:
+    matched_set = {p.strip() for p in matched_publishers if p.strip()}
+    modes: set[str] = set()
+    for entry in category_entries:
+        publisher = str(entry.get("publisher", "")).strip()
+        if publisher not in matched_set:
+            continue
+        mode = normalize_territory_mode(str(entry.get("territory", "")))
+        modes.add(mode)
+    if not modes:
+        return "single"
+    if len(modes) > 1:
+        return "mixed"
+    return next(iter(modes))
+
+
+def collect_split_territory_options(
+    matched_publishers: list[str],
+    category_entries: list[dict],
+    *,
+    max_territory_len: int = 90,
+) -> list[str]:
+    matched_set = {p.strip() for p in matched_publishers if p.strip()}
+    options: list[str] = []
+    seen: set[str] = set()
+    for entry in category_entries:
+        publisher = str(entry.get("publisher", "")).strip()
+        if publisher not in matched_set:
+            continue
+        split_rows = entry.get("split_territory") or []
+        if not isinstance(split_rows, list):
+            continue
+        for row in split_rows:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get("territory_code", "")).strip()
+            if not code or code in seen:
+                continue
+            territory = normalize_text_value(str(row.get("territory", "") or ""))
+            label = code
+            if territory:
+                snippet = territory[:max_territory_len].rstrip()
+                if len(territory) > max_territory_len:
+                    snippet = f"{snippet}..."
+                label = f"{code} - {snippet}"
+            seen.add(code)
+            options.append(label)
+    return options
+
+
+def split_territory_code_label(value: str) -> str:
+    return value.split(" - ", 1)[0].strip()
 
 
 def build_agreements(
@@ -2085,6 +2141,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     raw_cues = []
     temp_paths: list[Path] = []
+    default_split_selection: list[str] | None = None
 
     def _cleanup() -> None:
         for path in temp_paths:
@@ -2157,6 +2214,91 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             matched_publishers = result.get("found_controlled_publishers", [])
             accuracy_audits = result.get("evidence_by_controlled", {})
         if matched_publishers:
+            territory_mode = resolve_territory_mode(matched_publishers, cat_object)
+            if territory_mode == "mixed":
+                err_dir = pdf_path.parent / "_error"
+                err_dir.mkdir(exist_ok=True)
+                pdf_path.replace(err_dir / pdf_path.name)
+                created_dirs.add("_error")
+                api.log(
+                    "error",
+                    f"{pdf_path.name}: mixed territory modes across matched publishers; moved to _error",
+                )
+                continue
+
+            selected_codes: set[str] | None = None
+            territory_key = "multi_territory"
+            if territory_mode == "split":
+                territory_key = "split_territory"
+                split_options = collect_split_territory_options(
+                    matched_publishers, cat_object
+                )
+                available_codes = {
+                    split_territory_code_label(value) for value in split_options
+                }
+                if not split_options:
+                    api.emit_result(
+                        {
+                            "_status": "error",
+                            "_title": "Error: Missing Split Territories",
+                            "Info": (
+                                "Split territory rows are missing for one or more matched publishers; "
+                                "cannot prompt for territory selection."
+                            ),
+                        }
+                    )
+                    return
+                if default_split_selection is not None:
+                    if not set(default_split_selection).issubset(available_codes):
+                        err_dir = pdf_path.parent / "_error"
+                        err_dir.mkdir(exist_ok=True)
+                        pdf_path.replace(err_dir / pdf_path.name)
+                        created_dirs.add("_error")
+                        api.log(
+                            "error",
+                            f"{pdf_path.name}: default split selection not valid for this file; moved to _error",
+                        )
+                        continue
+                    selected_codes = set(default_split_selection)
+                else:
+                    while True:
+                        selection_payload = api.request_input_json(
+                            "Select split territory codes",
+                            id="ferp_process_cue_sheets_split_codes",
+                            fields=[
+                                {
+                                    "id": "territory_codes",
+                                    "type": "multi_select",
+                                    "label": f"Publisher catalog code: {cat_code.upper()}",
+                                    "options": split_options,
+                                    "default": [],
+                                },
+                                {
+                                    "id": "use_default_split_selection",
+                                    "type": "bool",
+                                    "label": "Use this selection for remaining files",
+                                    "default": False,
+                                },
+                            ],
+                            show_text_input=False,
+                            payload_type=SplitTerritorySelectionResponse,
+                        )
+                        selected = selection_payload.get("territory_codes", [])
+                        if selected:
+                            if selection_payload.get("use_default_split_selection"):
+                                default_split_selection = [
+                                    split_territory_code_label(value)
+                                    for value in selected
+                                ]
+                            selected_codes = {
+                                split_territory_code_label(value) for value in selected
+                            }
+                            break
+                        api.log(
+                            "warn",
+                            "Select at least one territory code to continue.",
+                        )
+
             work_path = pdf_path
             if adjust_header:
                 temp_path = pdf_path.with_suffix(".header.tmp.pdf")
@@ -2165,14 +2307,39 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 make_top_space_first_page_inplace(temp_path, header_top_space)
                 work_path = temp_path
             api.check_cancel()
-            deal_start_date_text, controlled_territory_text = resolve_publisher_fields(
-                matched_publishers,
-                cat_object,
-            )
-            multi_territory_rows = resolve_multi_territory_rows(
-                matched_publishers,
-                cat_object,
-            )
+            if territory_mode in {"multiple", "split"}:
+                multi_territory_rows = resolve_multi_territory_rows(
+                    matched_publishers,
+                    cat_object,
+                    territory_key=territory_key,
+                    selected_codes=selected_codes,
+                )
+            else:
+                multi_territory_rows = []
+            if not multi_territory_rows:
+                raw_date, raw_territory = resolve_publisher_fields_raw(
+                    matched_publishers,
+                    cat_object,
+                )
+                if raw_date or raw_territory:
+                    multi_territory_rows = [
+                        {"effective date": raw_date, "territory": raw_territory}
+                    ]
+            if (
+                territory_mode == "split"
+                and selected_codes
+                and not multi_territory_rows
+            ):
+                err_dir = pdf_path.parent / "_error"
+                err_dir.mkdir(exist_ok=True)
+                pdf_path.replace(err_dir / pdf_path.name)
+                created_dirs.add("_error")
+                api.log(
+                    "error",
+                    f"{pdf_path.name}: split selection produced no territory rows; moved to _error",
+                )
+                continue
+
             agreements = build_agreements(
                 matched_publishers,
                 cat_object,
@@ -2184,8 +2351,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     work_path,
                     pdf_path,
                     matched_publishers,
-                    deal_start_date_text,
-                    controlled_territory_text,
                     multi_territory_rows,
                 )
                 set_xmp_metadata_inplace(
@@ -2200,8 +2365,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     work_path,
                     out_path,
                     matched_publishers,
-                    deal_start_date_text,
-                    controlled_territory_text,
                     multi_territory_rows,
                 )
                 set_xmp_metadata_inplace(
