@@ -2040,6 +2040,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     payload = api.request_input_json(
         "Publisher catalog code (e.g., 'uvs', 'amz', etc.)",
         id="ferp_process_cue_sheets_cat_code",
+        suggestions=[pub for pub in pubs.keys()],
         fields=[
             {
                 "id": "recursive",
