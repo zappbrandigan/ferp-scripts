@@ -33,8 +33,10 @@ from ferp.fscp.scripts import sdk
 warnings.filterwarnings("ignore", category=PdfReadWarning)
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 
+# Used to suppress false positives when the surrounding text indicates logos or EE usage.
 LOGO_RE = re.compile(r"(?<![A-Z0-9])logos?(?![A-Z0-9])", re.IGNORECASE)
 _CONTEXT_EE_RE = re.compile(r"(?<![A-Z0-9])EE(?![A-Z0-9])")
+_LICENSE_NOTE_RE = re.compile(r"(sync\s*license|master\s*license)", re.IGNORECASE)
 ADMINISTRATOR_NAME = "Universal Music Publishing"
 
 
@@ -73,8 +75,8 @@ class AgreementEntry(TypedDict):
 
 SOUNDMOUSE_COLUMNS: List[Tuple[str, float, float]] = [
     ("cue #", 0, 35),
-    ("reel #", 35, 60),
-    ("title", 60, 225),
+    ("reel #", 35, 65),
+    ("title", 65, 225),
     ("role", 225, 250),
     ("name", 250, 340),
     ("society", 340, 450),
@@ -174,6 +176,7 @@ def parse_soundmouse(
         "duration": str | None,
         "composers": [{"name": ..., "society": ...}],
         "publishers": [{"name": ..., "society": ...}],
+        "notes": ["Note", "Note", ...],
       }
     """
     cues: list[Dict[str, Any]] = []
@@ -258,6 +261,7 @@ def parse_soundmouse(
                         "duration": duration,
                         "composers": [],
                         "publishers": [],
+                        "notes": [],
                     }
                     last_seen_role = None
                 else:
@@ -271,8 +275,10 @@ def parse_soundmouse(
                         current_cue["usage"] = usage
                     if not current_cue.get("duration") and duration:
                         current_cue["duration"] = duration
-                    if not current_cue.get("reel") and reel_no:
-                        current_cue["reel"] = reel_no
+                    if reel_no and title and (not duration or not usage):
+                        current_cue["notes"].append(
+                            reel_no.strip() + " " + title.strip()
+                        )
 
                 # At this point we have a current cue; attach contributor if present
                 if current_cue and name:
@@ -303,6 +309,7 @@ def parse_soundmouse(
             f"pages={pages_scanned} | pages_with_table={pages_with_tables} | "
             f"words={words_total} | rows={rows_total} | cues={len(cues)}"
         )
+        # log_fn(f"soundmouse text: cues={cues}")
     return cues
 
 
@@ -346,7 +353,9 @@ RC_DESCRIPTOR_TERMS = {
     "MAIN TITLE",
     "OPENING",
     "CLOSING",
+    "SEGMENT",
     "BUMPER",
+    "LOGO",
 }
 
 
@@ -419,6 +428,7 @@ def rc_extract_lines(
     log_fn: Optional[Callable[[str], None]] = None,
     check_cancel: Callable[[], None] | None = None,
 ) -> List[str]:
+    """Extract RapidCue lines, stripping headers/footers and non-data clutter."""
     lines: List[str] = []
     pages_scanned = 0
     with pdfplumber.open(pdf_path) as pdf:
@@ -465,6 +475,7 @@ def parse_rapidcue(
     log_fn: Optional[Callable[[str], None]] = None,
     check_cancel: Callable[[], None] | None = None,
 ) -> list[Dict[str, Any]]:
+    """Parse RapidCue cue sheets into structured cue dictionaries."""
     lines = rc_extract_lines(pdf_path, log_fn=log_fn, check_cancel=check_cancel)
     cues: List[Dict[str, Any]] = []
 
@@ -519,9 +530,9 @@ def parse_rapidcue(
                 "title": m.group("title"),
                 "usage": m.group("usage"),
                 "time": m.group("time"),
-                "descriptors": [],
                 "composers": [],
                 "publishers": [],
+                "notes": [],
             }
             continue
 
@@ -531,7 +542,7 @@ def parse_rapidcue(
         # Peel descriptor prefix (e.g., "Bumper E ...")
         descriptor, remainder = rc_peel_descriptor_prefix(line)
         if descriptor:
-            current_cue["descriptors"].append(descriptor)
+            current_cue["notes"].append(descriptor)
 
         # Role start
         m = RC_ROLE_START_RE.match(remainder)
@@ -566,6 +577,7 @@ def default_extract_lines(
     log_fn: Optional[Callable[[str], None]] = None,
     check_cancel: Callable[[], None] | None = None,
 ) -> List[str]:
+    """Extract readable lines for the fallback parser."""
     lines: List[str] = []
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -593,17 +605,51 @@ def parse_default(
     check_cancel: Callable[[], None] | None = None,
     logo_context_chars: int = 180,
 ) -> list[Dict[str, Any]]:
+    """
+    Fallback parser for unknown formats.
+
+    Strategy:
+      - Canonicalize the full extracted text.
+      - Search for canonical publisher names in that canonical string.
+      - Suppress matches when nearby text suggests a logo/EE context.
+      - Avoid substring collisions by preferring the longest matching publisher name.
+
+    The logo_context_chars window is intentionally wide to catch logos that appear
+    near a publisher credit but not necessarily adjacent.
+    """
     cues: List[Dict[str, Any]] = []
     controlled_norm = [
         (pub, canonicalize_publisher_name(pub, drop_suffixes=True))
         for pub in controlled_publishers
     ]
+    canon_names = sorted({canon for _, canon in controlled_norm if canon})
+    # Precompute longer-name candidates so shorter matches don't fire inside them.
+    longer_by_prefix: dict[str, list[str]] = {}
+    for canon in canon_names:
+        prefix = canon + " "
+        longer = [other for other in canon_names if other.startswith(prefix)]
+        if longer:
+            longer_by_prefix[canon] = sorted(longer, key=len, reverse=True)
     lines = default_extract_lines(pdf_path, log_fn=log_fn, check_cancel=check_cancel)
     full_text = " ".join(lines)
     canon_text = canonicalize_text_for_search(full_text)
     matched_publishers_count = 0
     skipped_logo_matches = 0
     seen_publishers: set[str] = set()
+
+    def _find_phrase(text: str, phrase: str, start_at: int) -> int:
+        # Require space or string boundaries so we don't match inside tokens.
+        start = start_at
+        while True:
+            idx = text.find(phrase, start)
+            if idx == -1:
+                return -1
+            end = idx + len(phrase)
+            if (idx == 0 or text[idx - 1] == " ") and (
+                end == len(text) or text[end] == " "
+            ):
+                return idx
+            start = end
 
     for raw_name, norm_name in controlled_norm:
         if check_cancel is not None:
@@ -613,13 +659,22 @@ def parse_default(
         start = 0
         matched = False
         while True:
-            idx = canon_text.find(norm_name, start)
+            idx = _find_phrase(canon_text, norm_name, start)
             if idx == -1:
                 break
+            end = idx + len(norm_name)
+            shadowed = False
+            for longer in longer_by_prefix.get(norm_name, []):
+                if canon_text.startswith(longer, idx):
+                    long_end = idx + len(longer)
+                    if long_end == len(canon_text) or canon_text[long_end] == " ":
+                        start = long_end
+                        shadowed = True
+                        break
+            if shadowed:
+                continue
             context_start = max(0, idx - logo_context_chars)
-            context_end = min(
-                len(canon_text), idx + len(norm_name) + logo_context_chars
-            )
+            context_end = min(len(canon_text), end + logo_context_chars)
             context = canon_text[context_start:context_end]
             if LOGO_RE.search(context) or _CONTEXT_EE_RE.search(context):
                 skipped_logo_matches += 1
@@ -630,16 +685,16 @@ def parse_default(
                         "title": raw_name,
                         "usage": None,
                         "time": None,
-                        "descriptors": [],
                         "composers": [],
                         "publishers": [{"name": raw_name}],
+                        "notes": [],
                     }
                 )
                 matched_publishers_count += 1
                 seen_publishers.add(raw_name)
                 matched = True
                 break
-            start = idx + len(norm_name)
+            start = end
         if matched and log_fn:
             log_fn(f"default parser: matched_publisher={raw_name}")
     if log_fn:
@@ -653,12 +708,17 @@ def parse_default(
 # =================================================
 # Router / entry point
 # =================================================
-def detect_format(pdf_path: Path) -> Literal["soundmouse", "rapidcue", "unknown"]:
+def detect_format(
+    pdf_path: Path,
+) -> Literal["soundmouse", "rapidcue", "unknown", "needs_ocr"]:
     """
-    Returns: "soundmouse" | "rapidcue" | "unknown"
+    "needs_ocr" is used when the first page has no extractable text.
     """
     with pdfplumber.open(pdf_path) as pdf:
         first_page = pdf.pages[0]
+        text = first_page.extract_text() or ""
+        if not text.strip():
+            return "needs_ocr"
         if is_soundmouse_pdf(first_page):
             return "soundmouse"
         if is_rapidcue_pdf_first_page(first_page):
@@ -671,32 +731,12 @@ def filter_logos(cues: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     for cue in cues:
         title = cue.get("title", "") or ""
         usage = cue.get("usage")
+        notes = cue.get("notes") or []
         if usage == "EE" or LOGO_RE.search(title):
             continue
-        out.append(cue)
-    return out
-
-
-def filter_logos_unknown_format(
-    cues: list[Dict[str, Any]],
-    *,
-    lookback: int = 3,
-) -> list[Dict[str, Any]]:
-    out: list[Dict[str, Any]] = []
-    for index, cue in enumerate(cues):
-        title = cue.get("title", "") or ""
-        usage = cue.get("usage")
-        if usage == "EE" or LOGO_RE.search(title):
+        if any(LOGO_RE.search(note or "") for note in notes):
             continue
-        start = max(0, index - lookback)
-        should_skip = False
-        for prev in cues[start:index]:
-            prev_title = prev.get("title", "") or ""
-            prev_usage = prev.get("usage")
-            if prev_usage == "EE" or LOGO_RE.search(prev_title):
-                should_skip = True
-                break
-        if should_skip:
+        if any(_LICENSE_NOTE_RE.search(note or "") for note in notes):
             continue
         out.append(cue)
     return out
@@ -1134,7 +1174,8 @@ def build_xmp_metadata(
     <rdf:Description
       xmlns:ferp="https://tulbox.app/ferp/xmp/1.0">
       <ferp:administrator>{escape_xml(admin_value)}</ferp:administrator>
-{agreement_block}    </rdf:Description>
+        {agreement_block}    
+    </rdf:Description>
   </rdf:RDF>
 </x:xmpmeta>
 <?xpacket end='w'?>"""
@@ -2190,6 +2231,16 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
                     check_cancel=api.check_cancel,
                 )
+            elif fmt == "needs_ocr":
+                ocr_dir = pdf_path.parent / "_needs_ocr"
+                ocr_dir.mkdir(exist_ok=True)
+                pdf_path.replace(ocr_dir / pdf_path.name)
+                created_dirs.add("_needs_ocr")
+                api.log(
+                    "warn",
+                    f"{pdf_path.name}: no extractable text; moved to _needs_ocr",
+                )
+                continue
             else:
                 api.log(
                     "debug", f"{pdf_path.name}: unknown format; using default parser"
@@ -2206,6 +2257,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 filtered_cues = raw_cues
             else:
                 filtered_cues = filter_logos(raw_cues)
+                skipped_logos = len(raw_cues) - len(filtered_cues)
+                if skipped_logos:
+                    api.log(
+                        "debug",
+                        f"{pdf_path.name}: skipped_logo_cues={skipped_logos}",
+                    )
+                # api.log("debug", f"filtered cues:{filtered_cues}")
             result = find_controlled_publishers_present(
                 filtered_cues,
                 con_pubs,
@@ -2341,6 +2399,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 )
                 continue
 
+            # Ensure the stamp displays N/A when date/territory are missing.
+            stamp_rows = (
+                multi_territory_rows
+                if multi_territory_rows
+                else [{"effective date": "", "territory": ""}]
+            )
             agreements = build_agreements(
                 matched_publishers,
                 cat_object,
@@ -2352,7 +2416,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     work_path,
                     pdf_path,
                     matched_publishers,
-                    multi_territory_rows,
+                    stamp_rows,
                 )
                 set_xmp_metadata_inplace(
                     pdf_path,
@@ -2366,7 +2430,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     work_path,
                     out_path,
                     matched_publishers,
-                    multi_territory_rows,
+                    stamp_rows,
                 )
                 set_xmp_metadata_inplace(
                     out_path,
