@@ -12,14 +12,22 @@ import warnings
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict, cast
 
 import pdfplumber
 from pdfplumber.page import Page
 from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf._page import PageObject
 from pypdf.errors import PdfReadWarning
-from pypdf.generic import NameObject, NumberObject, StreamObject
+from pypdf.generic import (
+    ArrayObject,
+    DictionaryObject,
+    NameObject,
+    NumberObject,
+    PdfObject,
+    StreamObject,
+    TextStringObject,
+)
 
 # from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.utils import ImageReader
@@ -1265,220 +1273,129 @@ def wrap_text(text: str, font_name: str, font_size: float, max_width: float):
     return lines
 
 
-# def draw_top_right_badge(
-#     c: canvas.Canvas,
-#     page_w: float,
-#     page_h: float,
-#     *,
-#     second_line_text: str,  # dynamic line immediately after the fixed first line
-#     deal_start_date_text: str,  # dynamic value for "Deal Start Date" right column
-#     controlled_territory_text: str,  # dynamic value for "Controlled Territory" right column (wraps)
-#     image_path: str,
-#     margin_right: float = 5,
-#     margin_top: float = 5,
-#     padding: float = 5,
-#     gap: float = 5,
-#     image_w: float = 65,
-#     image_h: float = 45,
-#     top_font_name: str = "Calibri Bold",
-#     bottom_font_name: str = "Calibri",
-#     top_font_size: float = 8,
-#     bottom_font_size: float = 6,
-#     top_line_height: float = 8,
-#     top_line_gap: float = 2.0,  # extra vertical space between top line 1 and line 2
-#     bottom_line_height: float = 7.5,
-#     max_text_width: float = 170,  # max width for ALL text area to the right of the image
-#     min_text_width: float = 170,  # minimum width for ALL text area to the right of the image
-#     corner_radius: float = 5,
-#     stroke_rgb=(0, 0, 0),
-#     stroke_width: float = 1.0,
-#     # Horizontal rule styling / spacing
-#     rule_thickness: float = 0.75,
-#     rule_rgb=(0, 0, 0),
-#     rule_margin_top: float = 4,
-#     rule_margin_bottom: float = 1,
-#     # Two-column layout controls (below divider)
-#     col_gap: float = 20,  # space between left and right "columns"
-#     min_right_col_width: float = 40,  # ensures a sane wrap width even if left labels are wide
-# ):
-#     """
-#     Draws a rounded-rectangle badge anchored to the top-right corner.
-#     The rounded rectangle has a fully transparent background (fill=0) and a stroke.
+def _clone_pdf_object(writer: PdfWriter, obj: PdfObject | None):
+    if obj is None:
+        return None
+    clone = getattr(obj, "clone", None)
+    if callable(clone):
+        try:
+            return clone(writer)
+        except TypeError:
+            return clone(writer, {})
+    return obj
 
-#     Layout (right of image):
-#       Line 1 (fixed):  "Universal Music Publishing admin o/b/o"
-#       Line 2 (dynamic): second_line_text (can wrap to multiple lines)
-#       Divider line
-#       Row 1:  "Deal Start Date"       <deal_start_date_text>
-#       Row 2:  "Controlled Territory"  <controlled_territory_text>  (wraps within right column)
 
-#     Notes:
-#     - The box width is controlled by max_text_width/min_text_width (text area width).
-#     - Controlled territory wraps within the right column and will NOT expand the box width.
-#     - Wrapping is word-based only.
-#     """
+def _get_page_content_bytes(page: PageObject) -> bytes:
+    contents = page.get_contents()
+    if contents is None:
+        return b""
+    try:
+        return contents.get_data()
+    except AttributeError:
+        try:
+            return b"".join(c.get_data() for c in contents)
+        except Exception:
+            return bytes(contents)
 
-#     fixed_line_1 = "Universal Music Publishing admin o/b/o"
-#     left_label_1 = "Deal Start Date"
-#     left_label_2 = "Controlled Territory"
 
-#     # --- Column widths (below divider) --- (measured in bottom font size)
-#     left_col_w = max(
-#         pdfmetrics.stringWidth(left_label_1, bottom_font_name, bottom_font_size),
-#         pdfmetrics.stringWidth(left_label_2, bottom_font_name, bottom_font_size),
-#     )
+def _add_stamp_annotation(
+    writer: PdfWriter,
+    page: PageObject,
+    stamp_page: PageObject,
+    *,
+    rect_x: float,
+    rect_y: float,
+    rect_w: float,
+    rect_h: float,
+    shift_x: float,
+    shift_y: float,
+    stamp_name: str,
+) -> None:
+    resources = stamp_page.get("/Resources")
+    if resources is None:
+        resources_obj: PdfObject = DictionaryObject()
+    else:
+        try:
+            resources_obj = resources.get_object()
+        except AttributeError:
+            resources_obj = resources
+    resources_obj = cast(PdfObject, _clone_pdf_object(writer, resources_obj))
 
-#     # --- Decide overall text area width (right of image) ---
-#     # Start by clamping the total text area width to min/max.
-#     text_area_w = max(min_text_width, min(max_text_width, max_text_width))
+    content_bytes = _get_page_content_bytes(stamp_page)
+    translate = f"q 1 0 0 1 {-shift_x:.4f} {-shift_y:.4f} cm\n".encode("ascii")
+    appearance = StreamObject()
+    appearance.set_data(translate + content_bytes + b"\nQ")
+    appearance.update(
+        {
+            NameObject("/Type"): NameObject("/XObject"),
+            NameObject("/Subtype"): NameObject("/Form"),
+            NameObject("/FormType"): NumberObject(1),
+            NameObject("/BBox"): ArrayObject(
+                [
+                    NumberObject(0),
+                    NumberObject(0),
+                    NumberObject(rect_w),
+                    NumberObject(rect_h),
+                ]
+            ),
+            NameObject("/Resources"): resources_obj,
+        }
+    )
+    appearance_ref = writer._add_object(appearance)
 
-#     # Ensure we always have room for the right column; if not, expand text area to accommodate minimum right col.
-#     # Note: expanding may exceed max_text_width;
-#     min_total_for_cols = left_col_w + col_gap + min_right_col_width
-#     if text_area_w < min_total_for_cols:
-#         text_area_w = min_total_for_cols
+    annot = DictionaryObject()
+    annot.update(
+        {
+            NameObject("/Type"): NameObject("/Annot"),
+            NameObject("/Subtype"): NameObject("/Stamp"),
+            NameObject("/Rect"): ArrayObject(
+                [
+                    NumberObject(rect_x),
+                    NumberObject(rect_y),
+                    NumberObject(rect_x + rect_w),
+                    NumberObject(rect_y + rect_h),
+                ]
+            ),
+            NameObject("/AP"): DictionaryObject({NameObject("/N"): appearance_ref}),
+            NameObject("/Border"): ArrayObject(
+                [NumberObject(0), NumberObject(0), NumberObject(0)]
+            ),
+            NameObject("/F"): NumberObject(4),
+            NameObject("/Contents"): TextStringObject("Universal Music Publishing"),
+            NameObject("/NM"): TextStringObject(stamp_name),
+        }
+    )
+    annot_ref = writer._add_object(annot)
 
-#     right_col_w = max(text_area_w - left_col_w - col_gap, min_right_col_width)
+    annots = page.get("/Annots")
+    if annots is None:
+        annots_array = ArrayObject()
+    else:
+        try:
+            annots_array = annots.get_object()
+        except AttributeError:
+            annots_array = annots
+        if not isinstance(annots_array, ArrayObject):
+            annots_array = ArrayObject([annots_array])
 
-#     # --- Wrap top block (2 lines) ---
-#     top_line_1 = fixed_line_1
-#     top_line_2_lines = wrap_text(
-#         second_line_text, top_font_name, top_font_size, text_area_w
-#     )
+    if stamp_name:
+        cleaned = ArrayObject()
+        for item in annots_array:
+            try:
+                item_obj = item.get_object()
+            except AttributeError:
+                item_obj = item
+            if not isinstance(item_obj, DictionaryObject):
+                cleaned.append(item)
+                continue
+            nm_value = item_obj.get("/NM")
+            if nm_value == stamp_name:
+                continue
+            cleaned.append(item)
+        annots_array = cleaned
 
-#     # --- Wrap right-column values for the two rows (below divider) ---
-#     deal_date_lines = wrap_text(
-#         deal_start_date_text, bottom_font_name, bottom_font_size, right_col_w
-#     )
-#     territory_lines = wrap_text(
-#         controlled_territory_text, bottom_font_name, bottom_font_size, right_col_w
-#     )
-
-#     # --- Heights: compute using separate line heights ---
-#     top_block_h = (
-#         top_line_height  # first fixed line
-#         + top_line_gap  # adjustable gap
-#         + top_line_height * max(len(top_line_2_lines), 1)
-#     )
-
-#     row1_h = bottom_line_height * max(len(deal_date_lines), 1)
-#     row2_h = bottom_line_height * max(len(territory_lines), 1)
-
-#     text_stack_h = (
-#         top_block_h
-#         + rule_margin_top
-#         + rule_thickness
-#         + rule_margin_bottom
-#         + row1_h
-#         + row2_h
-#     )
-
-#     # --- Compute container size ---
-#     content_w = image_w + gap + text_area_w
-#     content_h = max(image_h, text_stack_h)
-
-#     rect_w = content_w + 2 * padding
-#     rect_h = content_h + 2 * padding
-
-#     r = min(corner_radius, rect_w / 2, rect_h / 2)
-
-#     rect_x = page_w - margin_right - rect_w
-#     rect_y = page_h - margin_top - rect_h
-
-#     c.saveState()
-
-#     # Stroke-only rounded rect (transparent background)
-#     c.setLineWidth(stroke_width)
-#     c.setStrokeColorRGB(*stroke_rgb)
-#     c.roundRect(rect_x, rect_y, rect_w, rect_h, r, stroke=1, fill=0)
-
-#     # Vertically center the full text stack in the available content height
-#     text_stack_bottom = rect_y + padding + (content_h - text_stack_h) / 2
-#     text_stack_top = text_stack_bottom + text_stack_h
-
-#     # Image aligned to top, matching first text line
-#     img_x = rect_x + padding
-#     img_y = text_stack_top - image_h
-
-#     img = ImageReader(image_path)
-#     c.drawImage(img, img_x, img_y, width=image_w, height=image_h, mask="auto")
-
-#     # Text origin
-#     text_x = img_x + image_w + gap
-
-#     # Baseline offsets for each font size / line height
-#     top_baseline_offset = (top_line_height - top_font_size) * 0.8
-#     bottom_baseline_offset = (bottom_line_height - bottom_font_size) * 0.8
-
-#     c.setFillColorRGB(0, 0, 0)
-#     cursor_y = text_stack_top
-#     # ---- Top block (top font size) ----
-#     c.setFont(top_font_name, top_font_size)
-
-#     # Line 1 (fixed)
-#     cursor_y -= top_line_height
-#     c.drawString(text_x, cursor_y + top_baseline_offset, top_line_1)
-
-#     # Adjustable gap between line 1 and line 2
-#     cursor_y -= top_line_gap
-
-#     # Line 2 (dynamic, wrapped)
-#     for line in top_line_2_lines:
-#         cursor_y -= top_line_height
-#         c.drawString(text_x, cursor_y + top_baseline_offset, line)
-
-#     # ---- Divider ----
-#     cursor_y -= rule_margin_top
-#     c.saveState()
-#     c.setLineWidth(rule_thickness)
-#     c.setStrokeColorRGB(*rule_rgb)
-#     c.line(text_x, cursor_y, text_x + text_area_w, cursor_y)
-#     c.restoreState()
-#     cursor_y -= rule_thickness + rule_margin_bottom
-
-#     # ---- Two-column rows (bottom font size) ----
-#     c.setFont(bottom_font_name, bottom_font_size)
-
-#     left_x = text_x
-#     right_x = text_x + left_col_w + col_gap
-
-#     # Row 1: Deal Start Date
-#     cursor_y -= bottom_line_height
-#     c.drawString(left_x, cursor_y + bottom_baseline_offset, left_label_1)
-#     c.drawString(
-#         right_x,
-#         cursor_y + bottom_baseline_offset,
-#         deal_date_lines[0] if deal_date_lines else "",
-#     )
-#     for extra in deal_date_lines[1:] if deal_date_lines else []:
-#         cursor_y -= bottom_line_height
-#         c.drawString(right_x, cursor_y + bottom_baseline_offset, extra)
-
-#     # Row 2: Controlled Territory
-#     cursor_y -= bottom_line_height
-#     c.drawString(left_x, cursor_y + bottom_baseline_offset, left_label_2)
-#     c.drawString(
-#         right_x,
-#         cursor_y + bottom_baseline_offset,
-#         territory_lines[0] if territory_lines else "",
-#     )
-#     for extra in territory_lines[1:] if territory_lines else []:
-#         cursor_y -= bottom_line_height
-#         c.drawString(right_x, cursor_y + bottom_baseline_offset, extra)
-
-#     c.restoreState()
-
-#     return {
-#         "rect": (rect_x, rect_y, rect_w, rect_h),
-#         "image": (img_x, img_y, image_w, image_h),
-#         "text_area": (text_x, text_stack_bottom, text_area_w, text_stack_h),
-#         "columns": {"left_w": left_col_w, "right_w": right_col_w, "gap": col_gap},
-#         "top_block": {"line1": top_line_1, "line2_lines": top_line_2_lines},
-#         "rows": {
-#             "deal_start_date_lines": deal_date_lines,
-#             "territory_lines": territory_lines,
-#         },
-#     }
+    annots_array.append(annot_ref)
+    page[NameObject("/Annots")] = annots_array
 
 
 def draw_top_full_badge(
@@ -1726,6 +1643,7 @@ def draw_top_full_badge(
         "columns": {"left_w": left_col_w, "right_w": right_col_w, "gap": col_gap},
         "top_block": {"line1": fixed_line_1, "line2_lines": top_line_2_lines},
         "row_count": len(data_rows),
+        "stroke_width": stroke_width,
     }
 
 
@@ -1754,7 +1672,7 @@ def add_stamp(
 
     c = canvas.Canvas(str(temp_path), pagesize=(page_w, page_h))
 
-    draw_top_full_badge(
+    badge_info = draw_top_full_badge(
         c,
         page_w,
         page_h,
@@ -1771,18 +1689,31 @@ def add_stamp(
         return
     stamp_page = stamp_reader.pages[0]
 
+    rect_x, rect_y, rect_w, rect_h = badge_info["rect"]
+    stroke_width = float(badge_info.get("stroke_width", 0.0) or 0.0)
+    inset = stroke_width / 2.0
+    extra_top = max(0.0, stroke_width / 2.0)
+    extra_sides = max(0.0, stroke_width / 2.0)
+    rect_x_page = rect_x + offset_x - inset - extra_sides
+    rect_y_page = rect_y + offset_y - inset
+    rect_w += inset * 2 + extra_sides * 2
+    rect_h += inset * 2 + extra_top
+
     writer = PdfWriter()
     for index, page in enumerate(reader.pages):
         if index == 0:
-            transform = Transformation().translate(offset_x, offset_y)
-            merge_transformed = getattr(page, "merge_transformed_page", None)
-            if callable(merge_transformed):
-                merge_transformed(stamp_page, transform)
-            else:
-                add_transformation = getattr(stamp_page, "add_transformation", None)
-                if callable(add_transformation):
-                    add_transformation(transform)
-                page.merge_page(stamp_page)
+            _add_stamp_annotation(
+                writer,
+                page,
+                stamp_page,
+                rect_x=rect_x_page,
+                rect_y=rect_y_page,
+                rect_w=rect_w,
+                rect_h=rect_h,
+                shift_x=rect_x - inset - extra_sides,
+                shift_y=rect_y - inset,
+                stamp_name="ferp:umpg-stamp",
+            )
         writer.add_page(page)
 
     if reader.metadata:
