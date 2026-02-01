@@ -1361,7 +1361,6 @@ def _add_stamp_annotation(
                 [NumberObject(0), NumberObject(0), NumberObject(0)]
             ),
             NameObject("/F"): NumberObject(4),
-            NameObject("/Contents"): TextStringObject("Universal Music Publishing"),
             NameObject("/NM"): TextStringObject(stamp_name),
         }
     )
