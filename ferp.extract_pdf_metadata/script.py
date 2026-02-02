@@ -64,6 +64,20 @@ def _parse_xmp(xmp: str) -> dict[str, object]:
         parsed["ferp:namespace"] = ns["ferp"]
         parsed["ferp:administrator"] = administrator.strip()
 
+    data_added_date = root.findtext(
+        ".//ferp:dataAddedDate", default="", namespaces=ns
+    )
+    if data_added_date.strip():
+        parsed["ferp:namespace"] = ns["ferp"]
+        parsed["ferp:dataAddedDate"] = data_added_date.strip()
+
+    stamp_spec_version = root.findtext(
+        ".//ferp:stampSpecVersion", default="", namespaces=ns
+    )
+    if stamp_spec_version.strip():
+        parsed["ferp:namespace"] = ns["ferp"]
+        parsed["ferp:stampSpecVersion"] = stamp_spec_version.strip()
+
     agreements: list[dict[str, object]] = []
     agreement_nodes = root.findall(".//ferp:agreements/rdf:Bag/rdf:li", ns)
     for agreement_node in agreement_nodes:
@@ -102,6 +116,8 @@ def _parse_xmp(xmp: str) -> dict[str, object]:
 
 def _split_agreements_for_csv(metadata: dict[str, object]) -> list[dict[str, str]]:
     administrator = str(metadata.get("ferp:administrator", "") or "")
+    data_added_date = str(metadata.get("ferp:dataAddedDate", "") or "")
+    stamp_spec_version = str(metadata.get("ferp:stampSpecVersion", "") or "")
     agreements = metadata.get("ferp:agreements", [])
     if not isinstance(agreements, list):
         agreements = []
@@ -110,6 +126,8 @@ def _split_agreements_for_csv(metadata: dict[str, object]) -> list[dict[str, str
         rows.append(
             {
                 "Administrator": administrator,
+                "Data Added Date": data_added_date,
+                "Stamp Spec Version": stamp_spec_version,
                 "Agreement": "",
                 "Publishers": "",
                 "Effective Date": "",
@@ -131,6 +149,8 @@ def _split_agreements_for_csv(metadata: dict[str, object]) -> list[dict[str, str
             rows.append(
                 {
                     "Administrator": administrator,
+                    "Data Added Date": data_added_date,
+                    "Stamp Spec Version": stamp_spec_version,
                     "Agreement": str(index),
                     "Publishers": publisher_text,
                     "Effective Date": "",
@@ -151,6 +171,8 @@ def _split_agreements_for_csv(metadata: dict[str, object]) -> list[dict[str, str
             rows.append(
                 {
                     "Administrator": administrator,
+                    "Data Added Date": data_added_date,
+                    "Stamp Spec Version": stamp_spec_version,
                     "Agreement": str(index),
                     "Publishers": publisher_text,
                     "Effective Date": date_value,
@@ -169,6 +191,8 @@ def _write_csv(csv_path: Path, rows: list[dict[str, str]]) -> None:
                 "File",
                 "Relative Path",
                 "Administrator",
+                "Data Added Date",
+                "Stamp Spec Version",
                 "Agreement",
                 "Publishers",
                 "Effective Date",
@@ -322,6 +346,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         "File": pdf_path.name,
                         "Relative Path": relative_path,
                         "Administrator": "",
+                        "Data Added Date": "",
+                        "Stamp Spec Version": "",
                         "Agreement": "",
                         "Publishers": "",
                         "Effective Date": "",

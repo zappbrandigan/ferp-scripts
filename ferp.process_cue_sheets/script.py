@@ -10,7 +10,7 @@ import tempfile
 import unicodedata
 import warnings
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict, cast
 
@@ -46,6 +46,7 @@ LOGO_RE = re.compile(r"(?<![A-Z0-9])logos?(?![A-Z0-9])", re.IGNORECASE)
 _CONTEXT_EE_RE = re.compile(r"(?<![A-Z0-9])EE(?![A-Z0-9])")
 _LICENSE_NOTE_RE = re.compile(r"(sync\s*license|master\s*license)", re.IGNORECASE)
 ADMINISTRATOR_NAME = "Universal Music Publishing"
+STAMP_SPEC_VERSION = "0.0.1"
 
 
 class UserResponse(TypedDict):
@@ -1118,6 +1119,7 @@ def build_xmp_metadata(
     Returns UTF-8 XML bytes.
     """
     admin_value = normalize_text_value(administrator)
+    added_date = datetime.now(timezone.utc).date().isoformat()
     agreement_items: list[str] = []
     for agreement in agreements:
         publishers = normalize_unique(agreement.get("publishers", []), sort=False)
@@ -1182,6 +1184,8 @@ def build_xmp_metadata(
     <rdf:Description
       xmlns:ferp="https://tulbox.app/ferp/xmp/1.0">
       <ferp:administrator>{escape_xml(admin_value)}</ferp:administrator>
+      <ferp:dataAddedDate>{escape_xml(added_date)}</ferp:dataAddedDate>
+      <ferp:stampSpecVersion>{escape_xml(STAMP_SPEC_VERSION)}</ferp:stampSpecVersion>
         {agreement_block}    
     </rdf:Description>
   </rdf:RDF>
@@ -1271,6 +1275,54 @@ def wrap_text(text: str, font_name: str, font_size: float, max_width: float):
             current = w
     lines.append(current)
     return lines
+
+
+def wrap_phrases(
+    phrases: list[str],
+    font_name: str,
+    font_size: float,
+    max_width: float,
+    *,
+    joiner: str = "and",
+):
+    """
+    Greedy wrap that keeps each phrase intact.
+    Phrases after the first are prefixed with "<joiner> ".
+    """
+    cleaned = [p.strip() for p in phrases if str(p or "").strip()]
+    if not cleaned:
+        return [""]
+
+    tokens = [cleaned[0]] + [f"{joiner} {p}" for p in cleaned[1:]]
+
+    def concat(a: str, b: str) -> str:
+        if not a:
+            return b
+        if not b:
+            return a
+        if a.endswith(" ") or b.startswith(" "):
+            return a + b
+        return a + " " + b
+
+    lines = []
+    current = tokens[0]
+    for t in tokens[1:]:
+        trial = concat(current, t)
+        if pdfmetrics.stringWidth(trial, font_name, font_size) <= max_width:
+            current = trial
+        else:
+            lines.append(current)
+            current = t
+    lines.append(current)
+    return lines
+
+
+def build_publisher_line_phrases(prefix: str, publishers: list[str]) -> list[str]:
+    cleaned = [p.strip() for p in publishers if p.strip()]
+    if not cleaned:
+        return []
+    first = f"{prefix} {cleaned[0]}".strip()
+    return [first] + cleaned[1:]
 
 
 def _clone_pdf_object(writer: PdfWriter, obj: PdfObject | None):
@@ -1403,6 +1455,7 @@ def draw_top_full_badge(
     page_h: float,
     *,
     second_line_text: str,  # dynamic line immediately after the fixed first line
+    second_line_phrases: list[list[str]] | None = None,  # optional grouped phrases
     deal_start_date_and_territory: list[dict[str, str]],  # row data for table
     image_path: str,  # logo image file path
     image_y_offset: float = 1.5,  # vertical adjustment for image position
@@ -1488,9 +1541,20 @@ def draw_top_full_badge(
 
     # --- Wrap top block (centered) ---
     # We wrap using the full text area width (not per-column).
-    top_line_2_lines = wrap_text(
-        second_line_text, top_font_name, top_font_size, text_area_w
-    )
+    if second_line_phrases:
+        top_line_2_lines: list[str] = []
+        for phrases in second_line_phrases:
+            if not phrases:
+                continue
+            top_line_2_lines.extend(
+                wrap_phrases(phrases, top_font_name, top_font_size, text_area_w)
+            )
+        if not top_line_2_lines:
+            top_line_2_lines = [""]
+    else:
+        top_line_2_lines = wrap_text(
+            second_line_text, top_font_name, top_font_size, text_area_w
+        )
 
     # --- Prepare and wrap data rows (right column wraps; left column typically doesn't) ---
     # We also compute the total height contribution of all data rows.
@@ -1651,6 +1715,7 @@ def add_stamp(
     output_path: Path,
     matched_publishers: list[str],
     multi_territory_rows: list[dict[str, str]],
+    second_line_phrases: list[list[str]] | None = None,
 ) -> None:
     font_path_b = Path(__file__).resolve().parent / "assets" / "Calibrib.ttf"
     font_path = Path(__file__).resolve().parent / "assets" / "Calibri.ttf"
@@ -1676,6 +1741,7 @@ def add_stamp(
         page_w,
         page_h,
         second_line_text=" and ".join(matched_publishers),
+        second_line_phrases=second_line_phrases,
         deal_start_date_and_territory=multi_territory_rows,
         image_path=str(logo_path),
     )
@@ -1691,7 +1757,7 @@ def add_stamp(
     rect_x, rect_y, rect_w, rect_h = badge_info["rect"]
     stroke_width = float(badge_info.get("stroke_width", 0.0) or 0.0)
     inset = stroke_width / 2.0
-    extra_top = max(0.0, stroke_width / 2.0)
+    extra_top = max(0.0, stroke_width / 2.0) + 0.25
     extra_sides = max(0.0, stroke_width / 2.0)
     rect_x_page = rect_x + offset_x - inset - extra_sides
     rect_y_page = rect_y + offset_y - inset
@@ -1751,12 +1817,49 @@ def format_effective_date(date_text: str) -> str:
     return f"{dt.day} {dt.strftime('%B')} {dt.year}"
 
 
+def parse_catalog_codes(raw_value: str) -> list[str]:
+    raw_parts = (raw_value or "").split(",")
+    seen: set[str] = set()
+    codes: list[str] = []
+    for part in raw_parts:
+        code = part.strip().lower()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        codes.append(code)
+    return codes
+
+
+def format_rows_for_compare(rows: list[dict[str, str]]) -> list[tuple[str, str]]:
+    formatted: list[tuple[str, str]] = []
+    for row in rows:
+        eff_date = format_effective_date(row.get("effective date", ""))
+        territory = str(row.get("territory", "")).strip()
+        formatted.append((eff_date, territory))
+    return formatted
+
+
+def sort_stamp_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _sort_key(item: dict[str, str]) -> tuple[int, datetime | None, str]:
+        date_text = str(item.get("effective date", "")).strip()
+        try:
+            parsed = datetime.strptime(date_text, "%Y-%m-%d") if date_text else None
+        except ValueError:
+            parsed = None
+        has_date = 0 if parsed else 1
+        territory = str(item.get("territory", "")).strip()
+        return (has_date, parsed, territory)
+
+    return sorted(rows, key=_sort_key)
+
+
 def resolve_publisher_fields_raw(
     matched_publishers: list[str],
     category_entries: list[dict],
 ) -> tuple[str, str]:
     territory = ""
     effective_date = ""
+    latest_date: datetime | None = None
     matched_set = {p.strip() for p in matched_publishers if p.strip()}
     for entry in category_entries:
         publisher = str(entry.get("publisher", "")).strip()
@@ -1765,10 +1868,16 @@ def resolve_publisher_fields_raw(
             if territory_value and not territory:
                 territory = territory_value
             date_value = str(entry.get("effective date", "")).strip()
-            if date_value and not effective_date:
-                effective_date = date_value
-        if territory and effective_date:
-            break
+            if date_value:
+                try:
+                    parsed = datetime.strptime(date_value, "%Y-%m-%d")
+                except ValueError:
+                    parsed = None
+                if parsed and (latest_date is None or parsed > latest_date):
+                    latest_date = parsed
+                    effective_date = date_value
+                elif not latest_date and not effective_date:
+                    effective_date = date_value
     return effective_date, territory
 
 
@@ -1993,6 +2102,33 @@ def build_agreements(
     ]
 
 
+def build_agreements_for_groups(
+    publisher_groups: list[tuple[list[str], list[dict[str, str]]]],
+    category_entries: list[dict],
+) -> list[AgreementEntry]:
+    agreements: list[AgreementEntry] = []
+    for publishers, group_rows in publisher_groups:
+        if not publishers:
+            continue
+        effective_rows = group_rows
+        if not effective_rows:
+            raw_date, raw_territory = resolve_publisher_fields_raw(
+                publishers, category_entries
+            )
+            if raw_date or raw_territory:
+                effective_rows = [
+                    {"effective date": raw_date, "territory": raw_territory}
+                ]
+        effective_entries = normalize_effective_entries(effective_rows)
+        agreements.append(
+            {
+                "publishers": publishers,
+                "effective_dates": effective_entries,
+            }
+        )
+    return agreements
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     env_paths = ctx.environment.get("paths", {})
@@ -2009,7 +2145,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         pubs = json.load(handle)
 
     payload = api.request_input_json(
-        "Publisher catalog code (e.g., 'uvs', 'amz', etc.)",
+        "Publisher catalog code(s) (comma separated, e.g., 'uvs, amz')",
         id="ferp_process_cue_sheets_cat_code",
         suggestions=[pub for pub in pubs.keys()],
         fields=[
@@ -2041,24 +2177,47 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         payload_type=UserResponse,
     )
 
-    cat_code = payload["value"].lower()
-    if cat_code not in pubs.keys():
+    codes = parse_catalog_codes(payload["value"])
+    if not codes:
         api.emit_result(
             {
-                "_status": "warn",
-                "_title": "Warning: Invalid Catalog",
-                "Info": f"The code {cat_code} does not exist.",
+                "_status": "error",
+                "_title": "Error: Missing Catalog Codes",
+                "Info": "Enter at least one catalog code.",
+            }
+        )
+        return
+    invalid_codes = [code for code in codes if code not in pubs]
+    if invalid_codes:
+        api.emit_result(
+            {
+                "_status": "error",
+                "_title": "Error: Invalid Catalog Codes",
+                "Info": f"Invalid catalog codes: {', '.join(invalid_codes)}",
             }
         )
         return
 
-    cat_object: List[dict] = pubs[cat_code]
-    con_pubs: List[str] = [entry["publisher"] for entry in cat_object]
+    main_code = codes[0]
+    copub_codes = codes[1:]
+    cat_objects: list[list[dict]] = [pubs[main_code]] + [pubs[c] for c in copub_codes]
+    cat_object: List[dict] = [entry for group in cat_objects for entry in group]
+
+    main_con_pubs: List[str] = [entry["publisher"] for entry in pubs[main_code]]
+    copub_con_pubs: List[str] = [
+        entry["publisher"] for code in copub_codes for entry in pubs[code]
+    ]
+    con_pubs: List[str] = [*main_con_pubs, *copub_con_pubs]
+
+    codes_label = ", ".join(code.upper() for code in codes)
 
     recursive = payload["recursive"]
     in_place = payload["in_place"]
     adjust_header = payload["adjust_header"]
     manual_select = payload["manual_select"]
+
+    main_pub_set = {p.strip() for p in main_con_pubs if p.strip()}
+    copub_pub_set = {p.strip() for p in copub_con_pubs if p.strip()}
 
     selected_pubs: list[str] = []
     if manual_select and con_pubs:
@@ -2069,7 +2228,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 {
                     "id": "selected_pubs",
                     "type": "multi_select",
-                    "label": f"Publisher catalog code: {cat_code.upper()}",
+                    "label": f"Publisher catalog codes: {codes_label}",
                     "options": con_pubs,
                     "default": [],
                 }
@@ -2125,6 +2284,35 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.register_cleanup(_cleanup)
 
+    def _resolve_group_rows(
+        publishers: list[str],
+        territory_mode: str,
+        *,
+        selected_codes: set[str] | None,
+    ) -> list[dict[str, str]]:
+        if not publishers:
+            return []
+        if territory_mode in {"multiple", "split"}:
+            territory_key = (
+                "split_territory" if territory_mode == "split" else "multi_territory"
+            )
+            rows = resolve_multi_territory_rows(
+                publishers,
+                cat_object,
+                territory_key=territory_key,
+                selected_codes=selected_codes,
+            )
+        else:
+            rows = []
+        if not rows:
+            raw_date, raw_territory = resolve_publisher_fields_raw(
+                publishers,
+                cat_object,
+            )
+            if raw_date or raw_territory:
+                rows = [{"effective date": raw_date, "territory": raw_territory}]
+        return rows
+
     api.check_cancel()
     pdf_files = collect_pdfs(
         target_dir, recursive=recursive, check_cancel=api.check_cancel
@@ -2133,7 +2321,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     created_dirs: set[str] = set()
     api.log(
         "info",
-        f"Cue sheet PDFs found={total_files} | category_code={cat_code} | recursive={recursive}",
+        f"Cue sheet PDFs found={total_files} | category_codes={', '.join(codes)} | recursive={recursive}",
     )
 
     for index, pdf_path in enumerate(pdf_files, start=1):
@@ -2202,23 +2390,39 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             )
             matched_publishers = result.get("found_controlled_publishers", [])
             accuracy_audits = result.get("evidence_by_controlled", {})
+        matched_main = [p for p in matched_publishers if p in main_pub_set]
+        matched_copub = [p for p in matched_publishers if p in copub_pub_set]
+        has_both_groups = bool(matched_main) and bool(matched_copub)
+        second_line_phrases = None
+        if copub_codes and has_both_groups:
+            grouped_phrases: list[list[str]] = []
+            main_phrases = build_publisher_line_phrases("(1)", matched_main)
+            if main_phrases:
+                grouped_phrases.append(main_phrases)
+            copub_phrases = build_publisher_line_phrases("(2)", matched_copub)
+            if copub_phrases:
+                grouped_phrases.append(copub_phrases)
+            if grouped_phrases:
+                second_line_phrases = grouped_phrases
         if matched_publishers:
-            territory_mode = resolve_territory_mode(matched_publishers, cat_object)
-            if territory_mode == "mixed":
+            main_territory_mode = resolve_territory_mode(matched_main, cat_object)
+            copub_territory_mode = resolve_territory_mode(matched_copub, cat_object)
+            if main_territory_mode == "mixed" or copub_territory_mode == "mixed":
                 err_dir = pdf_path.parent / "_error"
                 err_dir.mkdir(exist_ok=True)
                 pdf_path.replace(err_dir / pdf_path.name)
                 created_dirs.add("_error")
                 api.log(
                     "error",
-                    f"{pdf_path.name}: mixed territory modes across matched publishers; moved to _error",
+                    f"{pdf_path.name}: mixed territory modes within a publisher group; moved to _error",
                 )
                 continue
 
             selected_codes: set[str] | None = None
-            territory_key = "multi_territory"
-            if territory_mode == "split":
-                territory_key = "split_territory"
+            needs_split = (
+                main_territory_mode == "split" or copub_territory_mode == "split"
+            )
+            if needs_split:
                 split_options = collect_split_territory_options(
                     matched_publishers, cat_object
                 )
@@ -2258,7 +2462,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                                 {
                                     "id": "territory_codes",
                                     "type": "multi_select",
-                                    "label": f"Publisher catalog code: {cat_code.upper()}",
+                                    "label": f"Publisher catalog codes: {codes_label}",
                                     "options": split_options,
                                     "default": [],
                                 },
@@ -2296,29 +2500,17 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 make_top_space_first_page_inplace(temp_path, header_top_space)
                 work_path = temp_path
             api.check_cancel()
-            if territory_mode in {"multiple", "split"}:
-                multi_territory_rows = resolve_multi_territory_rows(
-                    matched_publishers,
-                    cat_object,
-                    territory_key=territory_key,
-                    selected_codes=selected_codes,
-                )
-            else:
-                multi_territory_rows = []
-            if not multi_territory_rows:
-                raw_date, raw_territory = resolve_publisher_fields_raw(
-                    matched_publishers,
-                    cat_object,
-                )
-                if raw_date or raw_territory:
-                    multi_territory_rows = [
-                        {"effective date": raw_date, "territory": raw_territory}
-                    ]
-            if (
-                territory_mode == "split"
-                and selected_codes
-                and not multi_territory_rows
-            ):
+            main_rows = _resolve_group_rows(
+                matched_main,
+                main_territory_mode,
+                selected_codes=selected_codes,
+            )
+            copub_rows = _resolve_group_rows(
+                matched_copub,
+                copub_territory_mode,
+                selected_codes=selected_codes,
+            )
+            if needs_split and selected_codes and not (main_rows or copub_rows):
                 err_dir = pdf_path.parent / "_error"
                 err_dir.mkdir(exist_ok=True)
                 pdf_path.replace(err_dir / pdf_path.name)
@@ -2329,16 +2521,48 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 )
                 continue
 
+            stamp_rows: list[dict[str, str]] = []
+            if copub_codes and has_both_groups:
+                main_formatted = format_rows_for_compare(main_rows)
+                copub_formatted = format_rows_for_compare(copub_rows)
+                if (
+                    main_formatted
+                    and copub_formatted
+                    and main_formatted == copub_formatted
+                ):
+                    stamp_rows = main_rows or copub_rows
+                else:
+                    for row in main_rows:
+                        territory = str(row.get("territory", "")).strip()
+                        stamp_rows.append(
+                            {
+                                "effective date": row.get("effective date", ""),
+                                "territory": f"(1) {territory}",
+                            }
+                        )
+                    for row in copub_rows:
+                        territory = str(row.get("territory", "")).strip()
+                        stamp_rows.append(
+                            {
+                                "effective date": row.get("effective date", ""),
+                                "territory": f"(2) {territory}",
+                            }
+                        )
+            else:
+                stamp_rows = main_rows
+
             # Ensure the stamp displays N/A when date/territory are missing.
-            stamp_rows = (
-                multi_territory_rows
-                if multi_territory_rows
-                else [{"effective date": "", "territory": ""}]
-            )
-            agreements = build_agreements(
-                matched_publishers,
+            if not stamp_rows:
+                stamp_rows = [{"effective date": "", "territory": ""}]
+            else:
+                stamp_rows = sort_stamp_rows(stamp_rows)
+
+            agreements = build_agreements_for_groups(
+                [
+                    (matched_main, main_rows),
+                    (matched_copub, copub_rows),
+                ],
                 cat_object,
-                multi_territory_rows,
             )
             xmp_bytes = build_xmp_metadata(ADMINISTRATOR_NAME, agreements)
             if in_place:
@@ -2347,6 +2571,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     pdf_path,
                     matched_publishers,
                     stamp_rows,
+                    second_line_phrases=second_line_phrases,
                 )
                 set_xmp_metadata_inplace(
                     pdf_path,
@@ -2361,6 +2586,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     out_path,
                     matched_publishers,
                     stamp_rows,
+                    second_line_phrases=second_line_phrases,
                 )
                 set_xmp_metadata_inplace(
                     out_path,
@@ -2385,7 +2611,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             "_title": "Cue Sheet Processing Finished",
             "Created Directories": ", ".join(sorted(created_dirs)),
             "Total Files": total_files,
-            "Category Code": cat_code,
+            "Category Codes": ", ".join(codes),
         }
     )
 
