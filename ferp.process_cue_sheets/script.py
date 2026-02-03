@@ -43,7 +43,7 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 # Used to suppress false positives when the surrounding text indicates logos or EE usage.
 LOGO_RE = re.compile(r"(?<![A-Z0-9])logos?(?![A-Z0-9])", re.IGNORECASE)
-_CONTEXT_EE_RE = re.compile(r"(?<![A-Z0-9])EE(?![A-Z0-9])")
+_CONTEXT_EE_RE = re.compile(r"(?<!\S)EE(?!\S)")
 _LICENSE_NOTE_RE = re.compile(r"(sync\s*license|master\s*license)", re.IGNORECASE)
 ADMINISTRATOR_NAME = "Universal Music Publishing"
 STAMP_SPEC_VERSION = "0.0.1"
@@ -55,6 +55,7 @@ class UserResponse(TypedDict):
     in_place: bool
     adjust_header: bool
     manual_select: bool
+    custom_stamp: bool
 
 
 class PublisherSelectionResponse(TypedDict):
@@ -76,6 +77,11 @@ class EffectiveDateEntry(TypedDict):
 class AgreementEntry(TypedDict):
     publishers: list[str]
     effective_dates: list[EffectiveDateEntry]
+
+
+class CombinedTerritoryEntry(TypedDict):
+    dates: list[str]
+    groups: set[int]
 
 
 # =================================================
@@ -684,6 +690,12 @@ def parse_default(
                 continue
             context_start = max(0, idx - logo_context_chars)
             context_end = min(len(canon_text), end + logo_context_chars)
+            if context_start > 0 and canon_text[context_start - 1] != " ":
+                while context_start > 0 and canon_text[context_start - 1] != " ":
+                    context_start -= 1
+            if context_end < len(canon_text) and canon_text[context_end] != " ":
+                while context_end < len(canon_text) and canon_text[context_end] != " ":
+                    context_end += 1
             context = canon_text[context_start:context_end]
             if LOGO_RE.search(context) or _CONTEXT_EE_RE.search(context):
                 skipped_logo_matches += 1
@@ -711,6 +723,7 @@ def parse_default(
             "default parser: "
             f"matched_publishers={matched_publishers_count} | skipped_logo_matches={skipped_logo_matches}"
         )
+        # log_fn(f"canon text: {canon_text}")
     return cues
 
 
@@ -1853,13 +1866,50 @@ def sort_stamp_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     return sorted(rows, key=_sort_key)
 
 
+def _earliest_date_value(date_values: list[str]) -> str:
+    earliest: datetime | None = None
+    earliest_value = ""
+    for value in date_values:
+        if not value:
+            continue
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            parsed = None
+        if parsed and (earliest is None or parsed < earliest):
+            earliest = parsed
+            earliest_value = value
+        elif not earliest and not earliest_value:
+            earliest_value = value
+    return earliest_value
+
+
+def reduce_rows_by_territory(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    by_territory: dict[str, list[str]] = {}
+    for row in rows:
+        territory = str(row.get("territory", "")).strip()
+        date_value = str(row.get("effective date", "")).strip()
+        if not territory and not date_value:
+            continue
+        by_territory.setdefault(territory, []).append(date_value)
+    reduced: list[dict[str, str]] = []
+    for territory, date_values in by_territory.items():
+        reduced.append(
+            {
+                "effective date": _earliest_date_value(date_values),
+                "territory": territory,
+            }
+        )
+    return reduced
+
+
 def resolve_publisher_fields_raw(
     matched_publishers: list[str],
     category_entries: list[dict],
 ) -> tuple[str, str]:
     territory = ""
     effective_date = ""
-    latest_date: datetime | None = None
+    earliest_date: datetime | None = None
     matched_set = {p.strip() for p in matched_publishers if p.strip()}
     for entry in category_entries:
         publisher = str(entry.get("publisher", "")).strip()
@@ -1873,10 +1923,10 @@ def resolve_publisher_fields_raw(
                     parsed = datetime.strptime(date_value, "%Y-%m-%d")
                 except ValueError:
                     parsed = None
-                if parsed and (latest_date is None or parsed > latest_date):
-                    latest_date = parsed
+                if parsed and (earliest_date is None or parsed < earliest_date):
+                    earliest_date = parsed
                     effective_date = date_value
-                elif not latest_date and not effective_date:
+                elif not earliest_date and not effective_date:
                     effective_date = date_value
     return effective_date, territory
 
@@ -2173,12 +2223,19 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "label": "Select publishers",
                 "default": False,
             },
+            {
+                "id": "custom_stamp",
+                "type": "bool",
+                "label": "Custom stamp",
+                "default": False,
+            },
         ],
         payload_type=UserResponse,
     )
 
+    custom_stamp = payload["custom_stamp"]
     codes = parse_catalog_codes(payload["value"])
-    if not codes:
+    if not codes and not custom_stamp:
         api.emit_result(
             {
                 "_status": "error",
@@ -2187,40 +2244,54 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             }
         )
         return
-    invalid_codes = [code for code in codes if code not in pubs]
-    if invalid_codes:
-        api.emit_result(
-            {
-                "_status": "error",
-                "_title": "Error: Invalid Catalog Codes",
-                "Info": f"Invalid catalog codes: {', '.join(invalid_codes)}",
-            }
-        )
-        return
+    main_con_pubs: List[str] = []
+    copub_con_pubs: List[str] = []
+    if not custom_stamp:
+        invalid_codes = [code for code in codes if code not in pubs]
+        if invalid_codes:
+            api.emit_result(
+                {
+                    "_status": "error",
+                    "_title": "Error: Invalid Catalog Codes",
+                    "Info": f"Invalid catalog codes: {', '.join(invalid_codes)}",
+                }
+            )
+            return
 
-    main_code = codes[0]
-    copub_codes = codes[1:]
-    cat_objects: list[list[dict]] = [pubs[main_code]] + [pubs[c] for c in copub_codes]
-    cat_object: List[dict] = [entry for group in cat_objects for entry in group]
+        main_code = codes[0]
+        copub_codes = codes[1:]
+        cat_objects: list[list[dict]] = [pubs[main_code]] + [
+            pubs[c] for c in copub_codes
+        ]
+        cat_object: List[dict] = [entry for group in cat_objects for entry in group]
 
-    main_con_pubs: List[str] = [entry["publisher"] for entry in pubs[main_code]]
-    copub_con_pubs: List[str] = [
-        entry["publisher"] for code in copub_codes for entry in pubs[code]
-    ]
-    con_pubs: List[str] = [*main_con_pubs, *copub_con_pubs]
+        main_con_pubs = [entry["publisher"] for entry in pubs[main_code]]
+        copub_con_pubs = [
+            entry["publisher"] for code in copub_codes for entry in pubs[code]
+        ]
+        con_pubs: List[str] = [*main_con_pubs, *copub_con_pubs]
 
-    codes_label = ", ".join(code.upper() for code in codes)
+        codes_label = ", ".join(code.upper() for code in codes)
+    else:
+        copub_codes: list[str] = []
+        cat_object = []
+        con_pubs = []
+        codes_label = ""
 
     recursive = payload["recursive"]
     in_place = payload["in_place"]
     adjust_header = payload["adjust_header"]
     manual_select = payload["manual_select"]
 
-    main_pub_set = {p.strip() for p in main_con_pubs if p.strip()}
-    copub_pub_set = {p.strip() for p in copub_con_pubs if p.strip()}
+    if custom_stamp:
+        main_pub_set: set[str] = set()
+        copub_pub_set: set[str] = set()
+    else:
+        main_pub_set = {p.strip() for p in main_con_pubs if p.strip()}
+        copub_pub_set = {p.strip() for p in copub_con_pubs if p.strip()}
 
     selected_pubs: list[str] = []
-    if manual_select and con_pubs:
+    if manual_select and con_pubs and not custom_stamp:
         selection_payload = api.request_input_json(
             "Select controlled publishers",
             id="ferp_process_cue_sheets_selected_pubs",
@@ -2269,6 +2340,67 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 }
             )
             return
+
+    custom_publishers = ""
+    custom_territory = ""
+    custom_effective_date = ""
+    if custom_stamp:
+        publishers_response = api.request_input(
+            "Enter exact publishers string",
+            id="ferp_process_cue_sheets_custom_publishers",
+        )
+        custom_publishers = publishers_response.strip() if publishers_response else ""
+        if not custom_publishers:
+            api.emit_result(
+                {
+                    "_status": "error",
+                    "_title": "Error: Missing Publishers",
+                    "Info": "Publishers string is required for custom stamp.",
+                }
+            )
+            return
+
+        territory_response = api.request_input(
+            "Enter the exact territory string",
+            id="ferp_process_cue_sheets_custom_territory",
+        )
+        custom_territory = territory_response.strip() if territory_response else ""
+        if not custom_territory:
+            api.emit_result(
+                {
+                    "_status": "error",
+                    "_title": "Error: Missing Territory",
+                    "Info": "Territory string is required for custom stamp.",
+                }
+            )
+            return
+
+        date_response = api.request_input(
+            "Enter the effective date (D-M-YYYY)",
+            id="ferp_process_cue_sheets_custom_effective_date",
+        )
+        date_response = date_response.strip() if date_response else ""
+        if not date_response:
+            api.emit_result(
+                {
+                    "_status": "error",
+                    "_title": "Error: Missing Effective Date",
+                    "Info": "Effective date is required for custom stamp.",
+                }
+            )
+            return
+        try:
+            parsed_date = datetime.strptime(date_response, "%d-%m-%Y")
+        except ValueError:
+            api.emit_result(
+                {
+                    "_status": "error",
+                    "_title": "Error: Invalid Effective Date",
+                    "Info": "Enter the effective date in D-M-YYYY format.",
+                }
+            )
+            return
+        custom_effective_date = parsed_date.date().isoformat()
 
     raw_cues = []
     temp_paths: list[Path] = []
@@ -2327,6 +2459,71 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     for index, pdf_path in enumerate(pdf_files, start=1):
         api.check_cancel()
         api.progress(current=index, total=total_files, unit="files")
+        if custom_stamp:
+            fmt = "custom"
+            raw_cues = []
+            filtered_cues = []
+            matched_publishers = [custom_publishers]
+            accuracy_audits = {}
+
+            work_path = pdf_path
+            if adjust_header:
+                temp_path = pdf_path.with_suffix(".header.tmp.pdf")
+                temp_paths.append(temp_path)
+                shutil.copyfile(pdf_path, temp_path)
+                make_top_space_first_page_inplace(temp_path, header_top_space)
+                work_path = temp_path
+
+            stamp_rows = [
+                {
+                    "effective date": custom_effective_date,
+                    "territory": custom_territory,
+                }
+            ]
+            agreements: list[AgreementEntry] = [
+                {
+                    "publishers": [custom_publishers],
+                    "effective_dates": [
+                        {
+                            "date": custom_effective_date,
+                            "territories": [custom_territory],
+                        }
+                    ],
+                }
+            ]
+            xmp_bytes = build_xmp_metadata(ADMINISTRATOR_NAME, agreements)
+            if in_place:
+                add_stamp(
+                    work_path,
+                    pdf_path,
+                    matched_publishers,
+                    stamp_rows,
+                )
+                set_xmp_metadata_inplace(
+                    pdf_path,
+                    xmp_bytes,
+                    check_cancel=api.check_cancel,
+                )
+            else:
+                out_dir = pdf_path.parent / "_stamped"
+                out_path = out_dir / pdf_path.name
+                add_stamp(
+                    work_path,
+                    out_path,
+                    matched_publishers,
+                    stamp_rows,
+                )
+                set_xmp_metadata_inplace(
+                    out_path,
+                    xmp_bytes,
+                    check_cancel=api.check_cancel,
+                )
+                created_dirs.add("_stamped")
+            api.log(
+                "info",
+                f"Processed '{pdf_path.relative_to(target_dir)}' | format={fmt} | total_cues={len(raw_cues)} | filtered_cues={len(filtered_cues)} | matched_controlled_publishers={', '.join(matched_publishers)} | accuracy_audits={str(accuracy_audits)}",
+            )
+            continue
         if selected_pubs:
             fmt = "manual"
             raw_cues = []
@@ -2523,31 +2720,43 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
             stamp_rows: list[dict[str, str]] = []
             if copub_codes and has_both_groups:
-                main_formatted = format_rows_for_compare(main_rows)
-                copub_formatted = format_rows_for_compare(copub_rows)
-                if (
-                    main_formatted
-                    and copub_formatted
-                    and main_formatted == copub_formatted
-                ):
-                    stamp_rows = main_rows or copub_rows
-                else:
-                    for row in main_rows:
-                        territory = str(row.get("territory", "")).strip()
-                        stamp_rows.append(
-                            {
-                                "effective date": row.get("effective date", ""),
-                                "territory": f"(1) {territory}",
-                            }
-                        )
-                    for row in copub_rows:
-                        territory = str(row.get("territory", "")).strip()
-                        stamp_rows.append(
-                            {
-                                "effective date": row.get("effective date", ""),
-                                "territory": f"(2) {territory}",
-                            }
-                        )
+                main_reduced = reduce_rows_by_territory(main_rows)
+                copub_reduced = reduce_rows_by_territory(copub_rows)
+                combined: dict[str, CombinedTerritoryEntry] = {}
+                for row in main_reduced:
+                    territory = str(row.get("territory", "")).strip()
+                    date_value = str(row.get("effective date", "")).strip()
+                    entry = combined.setdefault(
+                        territory, {"dates": [], "groups": set()}
+                    )
+                    entry["dates"].append(date_value)
+                    entry["groups"].add(1)
+                for row in copub_reduced:
+                    territory = str(row.get("territory", "")).strip()
+                    date_value = str(row.get("effective date", "")).strip()
+                    entry = combined.setdefault(
+                        territory, {"dates": [], "groups": set()}
+                    )
+                    entry["dates"].append(date_value)
+                    entry["groups"].add(2)
+
+                for territory, entry in combined.items():
+                    dates = entry["dates"]
+                    groups = entry["groups"]
+                    earliest_date = (
+                        _earliest_date_value(dates) if isinstance(dates, list) else ""
+                    )
+                    prefix = ""
+                    if groups == {1}:
+                        prefix = "(1) "
+                    elif groups == {2}:
+                        prefix = "(2) "
+                    stamp_rows.append(
+                        {
+                            "effective date": earliest_date,
+                            "territory": f"{prefix}{territory}".strip(),
+                        }
+                    )
             else:
                 stamp_rows = main_rows
 
