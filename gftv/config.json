@@ -13,7 +13,7 @@
     {
       "id": "gftv.extractor",
       "name": "Extract: Email Attachments",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "script": "scripts/gftv/extractor/script.py",
       "dependencies": [
         "extract-msg>=0.55.0"
@@ -114,7 +114,7 @@
     {
       "id": "gftv.process_cue_sheets",
       "name": "Process: Stamp Cue Sheets",
-      "version": "1.4.0",
+      "version": "1.4.1",
       "script": "scripts/gftv/process_cue_sheets/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8",
