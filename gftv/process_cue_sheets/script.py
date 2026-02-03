@@ -2185,11 +2185,16 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     cache_dir = Path(env_paths.get("cache_dir"))
     cache_path = cache_dir / "publishers_cache.json"
     if not cache_path.exists():
-        raise FileNotFoundError(f"Cache file '{cache_path}' not found")
+        api.emit_result(
+            {
+                "_status": "error",
+                "_title": "Error: Missing Cache File",
+                "Info": "Sync your Monday board to create a cache before running this script.",
+            }
+        )
+        return
 
     target_dir = ctx.target_path
-    if not target_dir.exists() or not target_dir.is_dir():
-        raise ValueError(f"Target '{target_dir}' is not a directory.")
 
     with cache_path.open("r", encoding="utf-8") as handle:
         pubs = json.load(handle)
