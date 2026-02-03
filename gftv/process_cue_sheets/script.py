@@ -45,8 +45,27 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 LOGO_RE = re.compile(r"(?<![A-Z0-9])logos?(?![A-Z0-9])", re.IGNORECASE)
 _CONTEXT_EE_RE = re.compile(r"(?<!\S)EE(?!\S)")
 _LICENSE_NOTE_RE = re.compile(r"(sync\s*license|master\s*license)", re.IGNORECASE)
-ADMINISTRATOR_NAME = "Universal Music Publishing"
-STAMP_SPEC_VERSION = "0.0.1"
+ADMINISTRATOR_NAME = ""
+STAMP_SPEC_VERSION = ""
+
+
+def parse_board_description_yaml(description: str) -> dict[str, str]:
+    if not description:
+        return {}
+
+    parsed: dict[str, str] = {}
+    for raw_line in description.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if value and value[0] in {'"', "'"} and value[-1:] == value[0]:
+            value = value[1:-1]
+        if key:
+            parsed[key] = value
+    return parsed
 
 
 class UserResponse(TypedDict):
@@ -1507,7 +1526,7 @@ def draw_top_full_badge(
     The rounded rectangle has a fully transparent background (fill=0) and a stroke.
 
     Layout (right of image):
-      Line 1 (fixed):  "Universal Music Publishing admin o/b/o"    (centered)
+      Line 1 (fixed):  "Administration Co. admin o/b/o"    (centered)
       Line 2 (dynamic): second_line_text (centered, can wrap to multiple lines)
       Divider line
       Row 1 (headers):  "Deal Start Date"       "Controlled Territory"
@@ -1521,7 +1540,7 @@ def draw_top_full_badge(
     - Wrapping is word-based only.
     """
 
-    fixed_line_1 = "Universal Music Publishing admin o/b/o"
+    fixed_line_1 = ADMINISTRATOR_NAME + " admin o/b/o"
     col_header_1 = "Deal Start Date"
     col_header_2 = "Controlled Territory"
 
@@ -2198,11 +2217,25 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     with cache_path.open("r", encoding="utf-8") as handle:
         pubs = json.load(handle)
+    pub_keys = [key for key in pubs.keys() if not str(key).startswith("__")]
+    pub_key_set = set(pub_keys)
+    meta = pubs.get("__meta__", {}) if isinstance(pubs, dict) else {}
+    board_description = ""
+    if isinstance(meta, dict):
+        board_description = str(meta.get("board_description") or "")
+    description_map = parse_board_description_yaml(board_description)
+    admin_text = description_map.get("admin-text") or ""
+    stamp_spec = description_map.get("stamping-spec") or ""
+    global ADMINISTRATOR_NAME, STAMP_SPEC_VERSION
+    if admin_text:
+        ADMINISTRATOR_NAME = admin_text
+    if stamp_spec:
+        STAMP_SPEC_VERSION = stamp_spec
 
     payload = api.request_input_json(
         "Publisher catalog code(s) (comma separated, e.g., 'uvs, amz')",
         id="ferp_process_cue_sheets_cat_code",
-        suggestions=[pub for pub in pubs.keys()],
+        suggestions=[pub for pub in pub_keys],
         fields=[
             {
                 "id": "recursive",
@@ -2252,7 +2285,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     main_con_pubs: List[str] = []
     copub_con_pubs: List[str] = []
     if not custom_stamp:
-        invalid_codes = [code for code in codes if code not in pubs]
+        invalid_codes = [code for code in codes if code not in pub_key_set]
         if invalid_codes:
             api.emit_result(
                 {

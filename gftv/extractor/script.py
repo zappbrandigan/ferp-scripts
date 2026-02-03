@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 import shutil
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable
 
 import extract_msg
@@ -10,6 +11,103 @@ import extract_msg
 from ferp.fscp.scripts import sdk
 
 SKIP_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif"}
+WINDOWS_MAX_PATH = 240
+WINDOWS_INVALID_CHARS = set('<>:"/\\|?*')
+
+
+def _sanitize_component(component: str, max_len: int | None) -> str:
+    cleaned = "".join(
+        "_" if (ch in WINDOWS_INVALID_CHARS or ord(ch) < 32) else ch
+        for ch in component
+    )
+    cleaned = cleaned.rstrip(" .")
+    if not cleaned:
+        cleaned = "_"
+    if max_len is not None and len(cleaned) > max_len:
+        cleaned = cleaned[-max_len:]
+    return cleaned
+
+
+def _fit_components(
+    components: list[str], base_len: int, max_total: int | None
+) -> list[str]:
+    if max_total is None:
+        return components
+
+    sep_len = 1
+
+    def _total_len(parts: list[str]) -> int:
+        return base_len + sum(len(part) for part in parts) + sep_len * len(parts)
+
+    total = _total_len(components)
+    if total <= max_total:
+        return components
+
+    excess = total - max_total
+    trimmed: list[str] = []
+    for part in components:
+        if excess > 0:
+            reducible = max(len(part) - 1, 0)
+            cut = min(excess, reducible)
+            if cut:
+                part = part[cut:]
+                excess -= cut
+        if not part:
+            part = "_"
+        trimmed.append(part)
+
+    # If still too long, drop leading folders to keep the tail (unique IDs).
+    while _total_len(trimmed) > max_total and len(trimmed) > 1:
+        trimmed = trimmed[1:]
+
+    # Final fallback: trim the remaining component even further.
+    total = _total_len(trimmed)
+    if total > max_total and trimmed:
+        overflow = total - max_total
+        part = trimmed[-1]
+        if overflow >= len(part) - 1:
+            part = part[-1:]
+        else:
+            part = part[overflow:]
+        trimmed[-1] = part or "_"
+
+    return trimmed
+
+
+def _safe_extract_zip(
+    archive: zipfile.ZipFile, dest_dir: Path, log: Callable[[str, str], None]
+) -> None:
+    base_len = len(str(dest_dir))
+    max_total = WINDOWS_MAX_PATH if os.name == "nt" else None
+    max_component = 120 if os.name == "nt" else None
+
+    for info in archive.infolist():
+        rel_path = PurePosixPath(info.filename)
+        parts = [p for p in rel_path.parts if p not in ("", ".", "..")]
+        if not parts:
+            continue
+
+        safe_parts = [_sanitize_component(p, max_component) for p in parts]
+        safe_parts = _fit_components(safe_parts, base_len, max_total)
+        dest_path = dest_dir.joinpath(*safe_parts)
+
+        # Guard against zip-slip.
+        try:
+            dest_resolved = dest_path.resolve()
+        except FileNotFoundError:
+            dest_resolved = dest_path.parent.resolve() / dest_path.name
+        dest_root = dest_dir.resolve()
+        if dest_resolved != dest_root and dest_root not in dest_resolved.parents:
+            log("warn", f"Skipping suspicious zip entry: {info.filename}")
+            continue
+
+        if info.is_dir():
+            dest_path.mkdir(parents=True, exist_ok=True)
+            continue
+
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(info) as source, open(dest_path, "wb") as target:
+            shutil.copyfileobj(source, target)
 
 
 def _extract_from_msg(
@@ -20,7 +118,13 @@ def _extract_from_msg(
     msg = extract_msg.Message(str(msg_file))
     attachments = list(msg.attachments)
 
-    email_output_dir = output_dir / msg_file.stem
+    base_len = len(str(output_dir))
+    max_total = WINDOWS_MAX_PATH if os.name == "nt" else None
+    max_component = 120 if os.name == "nt" else None
+
+    safe_stem = _sanitize_component(msg_file.stem, max_component)
+    safe_stem = _fit_components([safe_stem], base_len, max_total)[0]
+    email_output_dir = output_dir / safe_stem
     email_output_dir.mkdir(parents=True, exist_ok=True)
 
     saved = 0
@@ -33,7 +137,14 @@ def _extract_from_msg(
         ext = Path(name).suffix.lower()
         if ext in SKIP_EXTENSIONS:
             continue
-        attachment.save(customPath=email_output_dir)
+        safe_name = _sanitize_component(name, max_component)
+        safe_name = _fit_components(
+            [safe_name], len(str(email_output_dir)), max_total
+        )[0]
+        try:
+            attachment.save(customPath=email_output_dir, customFilename=safe_name)
+        except TypeError:
+            attachment.save(customPath=email_output_dir)
         saved += 1
 
     return saved
@@ -61,7 +172,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.log("info", f"Extracting {zip_path.name} to {output_dir}")
     with zipfile.ZipFile(zip_path, "r") as archive:
-        archive.extractall(temp_dir)
+        _safe_extract_zip(archive, temp_dir, api.log)
 
     msg_files = list(temp_dir.rglob("*.msg"))
     if not msg_files:
