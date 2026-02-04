@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict, cast
 
 import pdfplumber
-from pdfplumber.page import Page
 from pypdf import PdfReader, PdfWriter, Transformation
 from pypdf._page import PageObject
 from pypdf.errors import PdfReadWarning
@@ -124,8 +123,7 @@ SOUNDMOUSE_HEADER_RE = re.compile(
 )
 
 
-def is_soundmouse_pdf(page: Page) -> bool:
-    text = page.extract_text() or ""
+def is_soundmouse_pdf(text: str) -> bool:
     if not text:
         return False
 
@@ -397,8 +395,7 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s.strip()).upper()
 
 
-def is_rapidcue_pdf_first_page(page: Page) -> bool:
-    text = page.extract_text() or ""
+def is_rapidcue_pdf(text: str) -> bool:
     if not text:
         return False
     if RAPIDCUE_COPYRIGHT_RE.search(text):
@@ -470,7 +467,7 @@ def rc_extract_lines(
             if check_cancel is not None:
                 check_cancel()
             pages_scanned += 1
-            text = page.extract_text() or ""
+            text = page.extract_text(x_tolerance=1) or ""
             for line in text.splitlines():
                 if check_cancel is not None:
                     check_cancel()
@@ -617,7 +614,7 @@ def default_extract_lines(
         for page in pdf.pages:
             if check_cancel is not None:
                 check_cancel()
-            text = page.extract_text() or ""
+            text = page.extract_text(x_tolerance=1) or ""
             for line in text.splitlines():
                 if check_cancel is not None:
                     check_cancel()
@@ -760,9 +757,9 @@ def detect_format(
         text = first_page.extract_text() or ""
         if not text.strip():
             return "needs_ocr"
-        if is_soundmouse_pdf(first_page):
+        if is_soundmouse_pdf(text):
             return "soundmouse"
-        if is_rapidcue_pdf_first_page(first_page):
+        if is_rapidcue_pdf(text):
             return "rapidcue"
     return "unknown"
 
@@ -800,6 +797,8 @@ _CORP_SUFFIXES = {
     "CORP",
     "CORPORATION",
     "PLC",
+    "SA",
+    "SL",
 }
 
 _STOPWORDS = {
@@ -914,25 +913,45 @@ def jaccard_similarity_sets(a: set, b: set) -> float:
     return len(a & b) / len(a | b)
 
 
-def build_controlled_index(controlled_publishers: List[str]) -> List[Dict[str, Any]]:
+def build_controlled_index(
+    controlled_publishers: List[str],
+    aliases_by_publisher: Dict[str, List[str]] | None = None,
+) -> List[Dict[str, Any]]:
     """
     Precompute canonical forms, token sets, and trigram counters for controlled publishers.
     """
     idx: List[Dict[str, Any]] = []
-    for pub in controlled_publishers:
-        canon = canonicalize_publisher_name(pub, drop_suffixes=True)
+    seen: set[tuple[str, str]] = set()
+
+    def add_entry(raw: str, controlled: str) -> None:
+        raw = raw.strip()
+        controlled = controlled.strip()
+        if not raw or not controlled:
+            return
+        key = (raw, controlled)
+        if key in seen:
+            return
+        seen.add(key)
+        canon = canonicalize_publisher_name(raw, drop_suffixes=True)
         canon_no_space = canon.replace(" ", "")
         tok_set = set(canon.split(" ")) if canon else set()
         tri = char_ngrams_from_canon_no_space(canon_no_space, 3)
         idx.append(
             {
-                "raw": pub,
+                "raw": raw,
+                "controlled": controlled,
                 "canon": canon,
                 "canon_no_space": canon_no_space,
                 "tokens": tok_set,
                 "trigrams": tri,
             }
         )
+
+    for pub in controlled_publishers:
+        add_entry(pub, pub)
+        for alias in (aliases_by_publisher or {}).get(pub, []):
+            if alias and alias != pub:
+                add_entry(alias, pub)
     return idx
 
 
@@ -963,7 +982,7 @@ def best_controlled_match_for_cue_name(
     best_feats = None
 
     for c in controlled_index:
-        if remaining_only is not None and c["raw"] not in remaining_only:
+        if remaining_only is not None and c["controlled"] not in remaining_only:
             continue
 
         # Conservative blocking to reduce work:
@@ -992,7 +1011,8 @@ def best_controlled_match_for_cue_name(
 
     return {
         "cue_name": cue_name,
-        "matched_controlled": best["raw"],
+        "matched_controlled": best["controlled"],
+        "matched_raw": best["raw"],
         "score": round(best_score, 6),
         "features": {k: round(v, 6) for k, v in (best_feats or {}).items()},
     }
@@ -1001,6 +1021,7 @@ def best_controlled_match_for_cue_name(
 def find_controlled_publishers_present(
     filtered_cues: List[Dict[str, Any]],
     controlled_publishers: List[str],
+    aliases_by_publisher: Dict[str, List[str]] | None = None,
     *,
     auto_match_threshold: float = 0.92,
     review_threshold: float = 0.85,
@@ -1015,7 +1036,9 @@ def find_controlled_publishers_present(
     - We never "need" to match a controlled publisher more than once, so we maintain a remaining set.
     - Also returns optional evidence (best match per controlled publisher).
     """
-    controlled_index = build_controlled_index(controlled_publishers)
+    controlled_index = build_controlled_index(
+        controlled_publishers, aliases_by_publisher
+    )
 
     remaining = set(controlled_publishers)  # raw names
     found_best_evidence: Dict[str, Dict[str, Any]] = {}
@@ -1140,6 +1163,44 @@ def normalize_effective_entries(rows: list[dict[str, str]]) -> list[EffectiveDat
             }
         )
     return ordered
+
+
+def normalize_observed_name_variants(value: Any) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        items = value.split(",")
+    elif isinstance(value, list):
+        items = value
+    else:
+        return []
+    cleaned: list[str] = []
+    for item in items:
+        if item is None:
+            continue
+        text = str(item).strip()
+        if text:
+            cleaned.append(text)
+    return cleaned
+
+
+def build_observed_name_variant_map(
+    category_entries: list[dict[str, Any]],
+) -> dict[str, list[str]]:
+    mapping: dict[str, list[str]] = {}
+    for entry in category_entries:
+        publisher = str(entry.get("publisher", "")).strip()
+        if not publisher:
+            continue
+        variants = normalize_observed_name_variants(entry.get("observed_name_variants"))
+        if not variants:
+            continue
+        bucket = mapping.setdefault(publisher, [])
+        for variant in variants:
+            if variant == publisher or variant in bucket:
+                continue
+            bucket.append(variant)
+    return mapping
 
 
 def build_xmp_metadata(
@@ -1519,6 +1580,7 @@ def draw_top_full_badge(
     # Table layout (below divider)
     col_gap: float = 20,  # space between the two columns
     min_right_col_width: float = 40,  # min width for territory column
+    single_row_max_right_col_width: float = 130,  # cap territory width when only one row
     header_bottom_gap: float = 0,  # space between header row and first data row
 ):
     """
@@ -1559,6 +1621,8 @@ def draw_top_full_badge(
         text_w = pdfmetrics.stringWidth(territory, bottom_font_name, bottom_font_size)
         if text_w > max_territory_w:
             max_territory_w = text_w
+    if len(deal_start_date_and_territory or []) == 1:
+        max_territory_w = min(max_territory_w, single_row_max_right_col_width)
 
     # --- Decide overall text area width (right of image) ---
     desired_text_area_w = left_col_w + col_gap + max_territory_w
@@ -1759,8 +1823,13 @@ def add_stamp(
     if not reader.pages:
         return
 
+    writer = PdfWriter()
     first_page = reader.pages[0]
-    page_w, page_h, offset_x, offset_y = get_page_box(first_page)
+    rotation = int(first_page.get("/Rotate", 0) or 0) % 360
+    stamp_page_target = (
+        normalize_page_rotation(first_page, writer) if rotation else first_page
+    )
+    page_w, page_h, offset_x, offset_y = get_page_box(stamp_page_target)
 
     temp_handle = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
     temp_path = Path(temp_handle.name)
@@ -1791,14 +1860,16 @@ def add_stamp(
     inset = stroke_width / 2.0
     extra_top = max(0.0, stroke_width / 2.0) + 0.25
     extra_sides = max(0.0, stroke_width / 2.0)
-    rect_x_page = rect_x + offset_x - inset - extra_sides
-    rect_y_page = rect_y + offset_y - inset
-    rect_w += inset * 2 + extra_sides * 2
-    rect_h += inset * 2 + extra_top
+    cushion = 2.0
+    rect_x_page = rect_x + offset_x - inset - extra_sides - cushion
+    rect_y_page = rect_y + offset_y - inset - cushion
+    rect_w += inset * 2 + extra_sides * 2 + cushion * 2
+    rect_h += inset * 2 + extra_top + cushion * 2
 
-    writer = PdfWriter()
     for index, page in enumerate(reader.pages):
         if index == 0:
+            if rotation:
+                page = stamp_page_target
             _add_stamp_annotation(
                 writer,
                 page,
@@ -1807,8 +1878,8 @@ def add_stamp(
                 rect_y=rect_y_page,
                 rect_w=rect_w,
                 rect_h=rect_h,
-                shift_x=rect_x - inset - extra_sides,
-                shift_y=rect_y - inset,
+                shift_x=rect_x - inset - extra_sides - cushion,
+                shift_y=rect_y - inset - cushion,
                 stamp_name="ferp:umpg-stamp",
             )
         writer.add_page(page)
@@ -1837,6 +1908,47 @@ def get_page_box(page) -> tuple[float, float, float, float]:
         float(box.lower_left[0]),
         float(box.lower_left[1]),
     )
+
+
+def normalize_page_rotation(page: PageObject, writer: PdfWriter) -> PageObject:
+    rotation = int(page.get("/Rotate", 0) or 0) % 360
+    if rotation == 0:
+        return page
+
+    box = page.mediabox
+    width = float(box.width)
+    height = float(box.height)
+    if rotation in {90, 270}:
+        new_width, new_height = height, width
+    else:
+        new_width, new_height = width, height
+
+    dst_page = PageObject.create_blank_page(
+        pdf=writer, width=new_width, height=new_height
+    )
+    annots = page.get("/Annots")
+    if annots is not None:
+        dst_page[NameObject("/Annots")] = annots
+
+    if rotation == 90:
+        transform = Transformation().rotate(-90).translate(0, width)
+    elif rotation == 180:
+        transform = Transformation().rotate(-180).translate(width, height)
+    elif rotation == 270:
+        transform = Transformation().rotate(-270).translate(height, 0)
+    else:
+        transform = Transformation()
+
+    merge_transformed = getattr(dst_page, "merge_transformed_page", None)
+    if callable(merge_transformed):
+        merge_transformed(page, transform)
+    else:
+        add_transformation = getattr(page, "add_transformation", None)
+        if callable(add_transformation):
+            add_transformation(transform)
+        dst_page.merge_page(page)
+
+    return dst_page
 
 
 def format_effective_date(date_text: str) -> str:
@@ -2316,6 +2428,15 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         con_pubs = []
         codes_label = ""
 
+    observed_name_variants = build_observed_name_variant_map(cat_object)
+    con_pubs_with_aliases = con_pubs
+    if observed_name_variants:
+        con_pubs_with_aliases = list(con_pubs)
+        for variants in observed_name_variants.values():
+            for variant in variants:
+                if variant not in con_pubs_with_aliases:
+                    con_pubs_with_aliases.append(variant)
+
     recursive = payload["recursive"]
     in_place = payload["in_place"]
     adjust_header = payload["adjust_header"]
@@ -2600,7 +2721,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 )
                 raw_cues = parse_default(
                     pdf_path,
-                    con_pubs,
+                    con_pubs_with_aliases,
                     log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
                     check_cancel=api.check_cancel,
                 )
@@ -2620,6 +2741,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             result = find_controlled_publishers_present(
                 filtered_cues,
                 con_pubs,
+                aliases_by_publisher=observed_name_variants,
                 auto_match_threshold=0.92,
                 review_threshold=0.85,
             )
