@@ -31,7 +31,6 @@ from pypdf.generic import (
 # from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 from typing_extensions import Literal
 
@@ -1089,19 +1088,28 @@ def collect_pdfs(
     def _is_in_underscore_dir(path: Path) -> bool:
         return any(parent.name.startswith("_") for parent in path.parents)
 
+    def _is_valid_pdf(path: Path) -> bool:
+        if path.name.startswith("._"):
+            return False
+        return True
+
     if recursive:
         files = []
         for path in root.rglob("*.pdf"):
             if check_cancel is not None:
                 check_cancel()
-            if path.is_file() and not _is_in_underscore_dir(path):
+            if (
+                path.is_file()
+                and not _is_in_underscore_dir(path)
+                and _is_valid_pdf(path)
+            ):
                 files.append(path)
         return sorted(files)
     files = []
     for path in root.glob("*.pdf"):
         if check_cancel is not None:
             check_cancel()
-        if path.is_file():
+        if path.is_file() and _is_valid_pdf(path):
             files.append(path)
     return sorted(files)
 
@@ -1559,8 +1567,8 @@ def draw_top_full_badge(
     image_w: float = 60,  # logo width in points
     image_h: float = 33,  # logo height in points
     # Fonts
-    top_font_name: str = "Calibri Bold",  # font for top two lines
-    bottom_font_name: str = "Calibri",  # font for table rows
+    top_font_name: str = "Helvetica-Bold",  # font for top two lines
+    bottom_font_name: str = "Helvetica",  # font for table rows
     top_font_size: float = 7,  # size for top two lines
     bottom_font_size: float = 6,  # size for table rows
     # Line metrics
@@ -1813,11 +1821,7 @@ def add_stamp(
     multi_territory_rows: list[dict[str, str]],
     second_line_phrases: list[list[str]] | None = None,
 ) -> None:
-    font_path_b = Path(__file__).resolve().parent / "assets" / "Calibrib.ttf"
-    font_path = Path(__file__).resolve().parent / "assets" / "Calibri.ttf"
     logo_path = Path(__file__).resolve().parent / "assets" / "logo.jpg"
-    pdfmetrics.registerFont(TTFont("Calibri Bold", str(font_path_b)))
-    pdfmetrics.registerFont(TTFont("Calibri", str(font_path)))
 
     reader = PdfReader(str(pdf_path))
     if not reader.pages:
@@ -1845,6 +1849,8 @@ def add_stamp(
         second_line_phrases=second_line_phrases,
         deal_start_date_and_territory=multi_territory_rows,
         image_path=str(logo_path),
+        top_font_name="Helvetica-Bold",
+        bottom_font_name="Helvetica",
     )
 
     c.showPage()
