@@ -1387,14 +1387,23 @@ def wrap_phrases(
     joiner: str = "and",
 ):
     """
-    Greedy wrap that keeps each phrase intact.
+    Greedy wrap that allows breaks within phrases.
     Phrases after the first are prefixed with "<joiner> ".
     """
     cleaned = [p.strip() for p in phrases if str(p or "").strip()]
     if not cleaned:
         return [""]
 
-    tokens = [cleaned[0]] + [f"{joiner} {p}" for p in cleaned[1:]]
+    tokens: list[str] = []
+    for idx, phrase in enumerate(cleaned):
+        words = phrase.split()
+        if not words:
+            continue
+        if idx == 0:
+            tokens.extend(words)
+            continue
+        tokens.append(joiner)
+        tokens.extend(words)
 
     def concat(a: str, b: str) -> str:
         if not a:
@@ -2888,39 +2897,22 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             if copub_codes and has_both_groups:
                 main_reduced = reduce_rows_by_territory(main_rows)
                 copub_reduced = reduce_rows_by_territory(copub_rows)
-                combined: dict[str, CombinedTerritoryEntry] = {}
                 for row in main_reduced:
                     territory = str(row.get("territory", "")).strip()
                     date_value = str(row.get("effective date", "")).strip()
-                    entry = combined.setdefault(
-                        territory, {"dates": [], "groups": set()}
+                    stamp_rows.append(
+                        {
+                            "effective date": date_value,
+                            "territory": f"(1) {territory}".strip(),
+                        }
                     )
-                    entry["dates"].append(date_value)
-                    entry["groups"].add(1)
                 for row in copub_reduced:
                     territory = str(row.get("territory", "")).strip()
                     date_value = str(row.get("effective date", "")).strip()
-                    entry = combined.setdefault(
-                        territory, {"dates": [], "groups": set()}
-                    )
-                    entry["dates"].append(date_value)
-                    entry["groups"].add(2)
-
-                for territory, entry in combined.items():
-                    dates = entry["dates"]
-                    groups = entry["groups"]
-                    earliest_date = (
-                        _earliest_date_value(dates) if isinstance(dates, list) else ""
-                    )
-                    prefix = ""
-                    if groups == {1}:
-                        prefix = "(1) "
-                    elif groups == {2}:
-                        prefix = "(2) "
                     stamp_rows.append(
                         {
-                            "effective date": earliest_date,
-                            "territory": f"{prefix}{territory}".strip(),
+                            "effective date": date_value,
+                            "territory": f"(2) {territory}".strip(),
                         }
                     )
             else:
