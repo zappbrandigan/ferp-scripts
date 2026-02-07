@@ -2335,7 +2335,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             {
                 "_status": "error",
                 "_title": "Error: Missing Cache File",
-                "Info": "Sync your Monday board to create a cache before running this script.",
+                "Info": "Pull your Monday board data to create a cache before running this script.",
             }
         )
         return

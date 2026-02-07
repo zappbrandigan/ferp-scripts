@@ -1,19 +1,19 @@
 # Query PDF
 
-Searches every PDF beneath the highlighted directory for a text pattern or
-regular expression, producing a CSV summary of all matches.
+Searches PDFs for a text pattern or regular expression, producing a CSV summary
+of all matches.
 
 ---
 
 ## FERP Integration
 
-- Operates on the `highlighted directory` in the File Navigator.
+- Operates on a highlighted directory or a single `.pdf` file in the File Navigator.
 - Prompts for the search query and options.
 - Emits per-file progress and logs whenever a file is skipped or fails.
 
 ## Usage
 
-1. Navigate into the directory tree you want to search.
+1. Navigate into the directory tree you want to search (or select a single PDF).
 2. Run **Query PDF** from the Scripts panel.
 3. Provide a search term (literal or regex).
 4. Optional settings (configure in the prompt):
@@ -23,12 +23,13 @@ regular expression, producing a CSV summary of all matches.
 
 ## Behavior
 
-- Recursively scans `*.pdf` files.
+- Recursively scans `*.pdf` files when a directory is selected.
+- Queries the selected PDF when a single file is selected.
 - Extracts plain text (skipping encrypted/unreadable PDFs with a warning).
 - Records every match with file name, relative path, page number, match text,
   and surrounding context.
-- Writes deterministic CSV results to the parent directory of the search root,
-  e.g. `<dir_name>_query_results.csv`.
+- Writes deterministic CSV results to the same directory as the target file/directory,
+  e.g. `<dir_name>_query_results.csv` or `<file_name>_query_results.csv`.
 
 ## Notes
 

@@ -3,22 +3,25 @@
     {
       "id": "gftv.extract_pdf_metadata",
       "name": "Extract: PDF Metadata",
-      "version": "1.1.1",
+      "version": "1.1.2",
       "script": "scripts/gftv/extract_pdf_metadata/script.py",
       "dependencies": [
         "pypdf>=6.6.0"
       ],
-      "target": "highlighted_directory"
+      "target": ["highlighted_directory", "highlighted_file"],
+      "file_extensions": [
+        ".pdf"
+      ]
     },
     {
       "id": "gftv.extractor",
       "name": "Extract: Email Attachments",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "script": "scripts/gftv/extractor/script.py",
       "dependencies": [
         "extract-msg>=0.55.0"
       ],
-      "target": "highlighted_file",
+      "target": ["highlighted_file", "highlighted_directory"],
       "file_extensions": [
         ".zip"
       ]
@@ -26,12 +29,12 @@
     {
       "id": "gftv.query_pdf",
       "name": "Query: PDF Files",
-      "version": "1.0.0",
+      "version": "1.0.2",
       "script": "scripts/gftv/query_pdf/script.py",
       "dependencies": [
         "pypdf>=6.6.0"
       ],
-      "target": "highlighted_directory"
+      "target": ["highlighted_directory", "highlighted_file"]
     },
     {
       "id": "gftv.merge_tabular",
@@ -41,7 +44,7 @@
       "dependencies": [
         "openpyxl>=3.1"
       ],
-      "target": "current_directory"
+      "target": ["current_directory"]
     },
     {
       "id": "gftv.normalize_pdf_names",
@@ -52,14 +55,14 @@
         "googletrans==4.0.2",
         "Unidecode>=1.3.8"
       ],
-      "target": "highlighted_directory"
+      "target": ["highlighted_directory"]
     },
     {
       "id": "gftv.rename_fox_emails",
       "name": "Rename: Fox Emails",
       "version": "1.0.0",
       "script": "scripts/gftv/rename_fox_emails/script.py",
-      "target": "highlighted_directory"
+      "target": ["highlighted_directory"]
     },
     {
       "id": "gftv.moonbug",
@@ -69,7 +72,7 @@
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
       ],
-      "target": "highlighted_directory"
+      "target": ["highlighted_directory"]
     },
     {
       "id": "gftv.convert_excel",
@@ -79,7 +82,17 @@
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
       ],
-      "target": "highlighted_directory"
+      "target": ["highlighted_directory"]
+    },
+    {
+      "id": "gftv.convert_html_to_pdf",
+      "name": "Convert: HTML to PDF",
+      "version": "1.0.0",
+      "script": "scripts/gftv/convert_html_to_pdf/script.py",
+      "target": ["highlighted_directory", "highlighted_file"],
+      "file_extensions": [
+        ".html"
+      ]
     },
     {
       "id": "gftv.rename_uvs",
@@ -89,7 +102,7 @@
       "dependencies": [
         "pdfplumber>=0.11.8"
       ],
-      "target": "highlighted_directory"
+      "target": ["highlighted_directory"]
     },
     {
       "id": "gftv.excel_diff",
@@ -99,7 +112,7 @@
       "dependencies": [
         "openpyxl>=3.1"
       ],
-      "target": "current_directory"
+      "target": ["current_directory"]
     },
     {
       "id": "gftv.pdf_text_diff",
@@ -109,19 +122,19 @@
       "dependencies": [
         "pdfplumber>=0.11.8"
       ],
-      "target": "current_directory"
+      "target": ["current_directory"]
     },
     {
       "id": "gftv.process_cue_sheets",
       "name": "Process: Stamp Cue Sheets",
-      "version": "1.4.4",
+      "version": "1.4.5",
       "script": "scripts/gftv/process_cue_sheets/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8",
         "pypdf>=3.0",
         "reportlab>=4.4.9"
       ],
-      "target": "highlighted_directory"
+      "target": ["highlighted_directory"]
     }
   ]
 }

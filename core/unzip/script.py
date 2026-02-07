@@ -68,9 +68,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 }
             )
             return
+        shutil.rmtree(output_dir, ignore_errors=True)
 
     extract_root = output_dir
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     if target_path.suffix.lower() == ".zip":
         with zipfile.ZipFile(target_path, "r") as zf:

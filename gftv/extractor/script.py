@@ -152,9 +152,18 @@ def _extract_from_msg(
 
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    zip_path = ctx.target_path
+    target_path = ctx.target_path
+    if ctx.target_kind == "file" and target_path.suffix.lower() != ".zip":
+        api.emit_result(
+            {
+                "_status": "error",
+                "_title": "Unsupported File",
+                "Info": "Select a .zip file or a directory and try again.",
+            }
+        )
+        return
 
-    output_dir = zip_path.parent / f"{zip_path.stem}_attachments"
+    output_dir = target_path.parent / f"{target_path.stem}_attachments"
     temp_dir = output_dir / "_unzipped"
     extracted = False
 
@@ -164,22 +173,26 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         if not extracted and output_dir.exists():
             shutil.rmtree(output_dir, ignore_errors=True)
 
-    api.register_cleanup(_cleanup)
+    source_dir = target_path
+    if ctx.target_kind == "file":
+        api.register_cleanup(_cleanup)
 
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir)
-    temp_dir.mkdir(parents=True, exist_ok=True)
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+        temp_dir.mkdir(parents=True, exist_ok=True)
 
-    api.log("info", f"Extracting {zip_path.name} to {output_dir}")
-    with zipfile.ZipFile(zip_path, "r") as archive:
-        _safe_extract_zip(archive, temp_dir, api.log)
+        api.log("info", f"Extracting {target_path.name} to {output_dir}")
+        with zipfile.ZipFile(target_path, "r") as archive:
+            _safe_extract_zip(archive, temp_dir, api.log)
+        source_dir = temp_dir
 
-    msg_files = list(temp_dir.rglob("*.msg"))
+    msg_files = list(source_dir.rglob("*.msg"))
     if not msg_files:
         api.log("warn", "No .msg files found in archive.")
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        if output_dir.exists():
-            shutil.rmtree(output_dir, ignore_errors=True)
+        if ctx.target_kind == "file":
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            if output_dir.exists():
+                shutil.rmtree(output_dir, ignore_errors=True)
         api.emit_result(
             {
                 "_status": "warn",
@@ -202,7 +215,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         api.log("info", f"{msg_file.name}: saved {saved} attachment(s)")
 
     extracted = True
-    shutil.rmtree(temp_dir, ignore_errors=True)
+    if ctx.target_kind == "file":
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
     api.emit_result(
         {

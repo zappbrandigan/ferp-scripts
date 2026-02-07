@@ -251,41 +251,49 @@ def _format_results(results: list[dict[str, object]]) -> str:
 
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
-    target_dir = ctx.target_path
+    target_path = ctx.target_path
+    base_dir = target_path if ctx.target_kind == "directory" else target_path.parent
+
+    fields: list[sdk.BoolField] = [
+        {
+            "id": "recursive",
+            "type": "bool",
+            "label": "Recursive",
+            "default": False,
+        },
+        {
+            "id": "write_csv",
+            "type": "bool",
+            "label": "Write CSV",
+            "default": False,
+        },
+    ]
+    if ctx.target_kind == "file":
+        fields = [field for field in fields if field["id"] != "recursive"]
 
     payload = api.request_input_json(
         "Metadata options",
         id="pdf_metadata_options",
-        fields=[
-            {
-                "id": "recursive",
-                "type": "bool",
-                "label": "Recursive",
-                "default": False,
-            },
-            {
-                "id": "write_csv",
-                "type": "bool",
-                "label": "Write CSV",
-                "default": False,
-            },
-        ],
+        fields=fields,
         show_text_input=False,
         payload_type=UserResponse,
     )
 
-    recursive = payload["recursive"]
+    recursive = payload.get("recursive", False)
     write_csv = payload["write_csv"]
 
-    pdf_files = _collect_pdfs(target_dir, recursive)
+    if ctx.target_kind == "file":
+        pdf_files = [target_path] if target_path.suffix.lower() == ".pdf" else []
+    else:
+        pdf_files = _collect_pdfs(target_path, recursive)
     total_files = len(pdf_files)
     if not total_files:
-        api.log("warn", f"No PDF files found: {target_dir}")
+        api.log("warn", f"No PDF files found: {target_path}")
         api.emit_result(
             {
                 "_status": "warn",
                 "_title": "No PDF Files Found",
-                "File Path": str(target_dir),
+                "File Path": str(target_path),
             }
         )
         return
@@ -325,7 +333,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             parsed_xmp = _parse_xmp(xmp)
             if parsed_xmp:
                 metadata = parsed_xmp
-        relative_path = str(pdf_path.relative_to(target_dir))
+        relative_path = str(pdf_path.relative_to(base_dir))
         if metadata:
             api.log("info", f"{relative_path}: {json.dumps(metadata, sort_keys=True)}")
         else:
@@ -366,7 +374,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     csv_path: Path | None = None
     if write_csv:
-        csv_path = target_dir.parent / f"{target_dir.name}_pdf_metadata.csv"
+        stem = (
+            target_path.stem
+            if ctx.target_kind == "file"
+            else target_path.name
+        )
+        csv_path = base_dir / f"{stem}_pdf_metadata.csv"
         _write_csv(csv_path, rows)
 
     api.emit_result(

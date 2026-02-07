@@ -5,7 +5,7 @@
       "name": "Compress: Zip",
       "version": "1.0.0",
       "script": "scripts/core/zip/script.py",
-      "target": "highlighted_directory"
+      "target": ["highlighted_directory"]
     },
     {
       "id": "core.unzip",
@@ -13,9 +13,9 @@
       "version": "1.0.0",
       "script": "scripts/core/unzip/script.py",
       "dependencies": [
-        "py7zr>=1.1.2"
+        "py7zr>=1.1.0"
       ],
-      "target": "highlighted_file",
+      "target": ["highlighted_file"],
       "file_extensions": [
         ".zip",
         ".7z"
@@ -26,14 +26,14 @@
       "name": "Archive: Create Backup",
       "version": "1.0.0",
       "script": "scripts/core/backup/script.py",
-      "target": "highlighted_directory"
+      "target": ["highlighted_directory"]
     },
     {
       "id": "core.restore",
       "name": "Archive: Restore Backup",
       "version": "1.0.0",
       "script": "scripts/core/restore/script.py",
-      "target": "highlighted_file",
+      "target": ["highlighted_file"],
       "file_extensions": [
         ".backup.zip"
       ]
@@ -43,21 +43,21 @@
       "name": "Normalize: Flatten Directory",
       "version": "1.0.0",
       "script": "scripts/core/flatten/script.py",
-      "target": "highlighted_directory"
+      "target": ["highlighted_directory"]
     },
     {
       "id": "core.summarize",
       "name": "Summarize: Directory",
       "version": "1.0.1",
       "script": "scripts/core/summarize/script.py",
-      "target": "highlighted_directory"
+      "target": ["highlighted_directory"]
     },
     {
       "id": "core.hello_world",
       "name": "Test: Hello World",
       "version": "1.0.0",
       "script": "scripts/core/hello_world/script.py",
-      "target": "current_directory"
+      "target": ["current_directory"]
     }
   ]
 }

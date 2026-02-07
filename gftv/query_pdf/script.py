@@ -166,9 +166,31 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             )
             return
 
-    root_path = ctx.target_path
-    pdf_files = sorted(root_path.rglob("*.pdf"))
+    target_path = ctx.target_path
+    root_path = target_path if ctx.target_kind == "directory" else target_path.parent
+    if ctx.target_kind == "file":
+        if target_path.suffix.lower() != ".pdf":
+            api.emit_result(
+                {
+                    "_status": "warn",
+                    "_title": "Warning",
+                    "Info": "Select a .pdf file or a directory to query.",
+                }
+            )
+            return
+        pdf_files = [target_path]
+    else:
+        pdf_files = sorted(root_path.rglob("*.pdf"))
     total_files = len(pdf_files)
+    if not total_files:
+        api.emit_result(
+            {
+                "_status": "warn",
+                "_title": "Warning",
+                "Info": "No PDF files found to search.",
+            }
+        )
+        return
     api.log(
         "info",
         (
@@ -207,7 +229,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     csv_path: Path | None = None
     if matches:
-        csv_path = root_path.parent / f"{root_path.name}_query_results.csv"
+        stem = target_path.stem if ctx.target_kind == "file" else root_path.name
+        output_dir = (
+            target_path.parent if ctx.target_kind == "file" else root_path.parent
+        )
+        csv_path = output_dir / f"{stem}_query_results.csv"
         _write_csv(csv_path, matches)
 
     api.emit_result(
