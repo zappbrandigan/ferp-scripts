@@ -35,6 +35,7 @@ from reportlab.pdfgen import canvas
 from typing_extensions import Literal
 
 from ferp.fscp.scripts import sdk
+from ferp.fscp.scripts.common import collect_files
 
 warnings.filterwarnings("ignore", category=PdfReadWarning)
 logging.getLogger("pypdf").setLevel(logging.ERROR)
@@ -1080,38 +1081,6 @@ def find_controlled_publishers_present(
         "evidence_by_controlled": found_best_evidence,
         "unmatched_controlled_publishers": sorted(remaining),
     }
-
-
-def collect_pdfs(
-    root: Path, recursive: bool, check_cancel: Callable[[], None] | None = None
-) -> list[Path]:
-    def _is_in_underscore_dir(path: Path) -> bool:
-        return any(parent.name.startswith("_") for parent in path.parents)
-
-    def _is_valid_pdf(path: Path) -> bool:
-        if path.name.startswith("._"):
-            return False
-        return True
-
-    if recursive:
-        files = []
-        for path in root.rglob("*.pdf"):
-            if check_cancel is not None:
-                check_cancel()
-            if (
-                path.is_file()
-                and not _is_in_underscore_dir(path)
-                and _is_valid_pdf(path)
-            ):
-                files.append(path)
-        return sorted(files)
-    files = []
-    for path in root.glob("*.pdf"):
-        if check_cancel is not None:
-            check_cancel()
-        if path.is_file() and _is_valid_pdf(path):
-            files.append(path)
-    return sorted(files)
 
 
 def escape_xml(s: str) -> str:
@@ -2620,8 +2589,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         return rows
 
     api.check_cancel()
-    pdf_files = collect_pdfs(
-        target_dir, recursive=recursive, check_cancel=api.check_cancel
+    pdf_files = collect_files(
+        target_dir,
+        "*.pdf",
+        recursive,
+        check_cancel=api.check_cancel,
     )
     total_files = len(pdf_files)
     created_dirs: set[str] = set()
@@ -2632,7 +2604,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     for index, pdf_path in enumerate(pdf_files, start=1):
         api.check_cancel()
-        api.progress(current=index, total=total_files, unit="files")
+        api.progress(
+            current=index,
+            total=total_files,
+            unit="files",
+            message=f"Processing Cue Sheets in '{pdf_path.parent.name}'",
+        )
         if custom_stamp:
             fmt = "custom"
             raw_cues = []

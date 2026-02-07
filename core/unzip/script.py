@@ -5,6 +5,7 @@ from pathlib import Path, PurePosixPath
 import py7zr
 
 from ferp.fscp.scripts import sdk
+from ferp.fscp.scripts.common import move_to_dir
 
 
 def _common_root(paths: list[str]) -> str | None:
@@ -35,7 +36,7 @@ def _flatten_nested_root(root: Path) -> None:
                 shutil.rmtree(destination)
             else:
                 destination.unlink()
-        child.rename(destination)
+        move_to_dir(child, root, base=child.stem, use_shutil=True)
 
     nested.rmdir()
 

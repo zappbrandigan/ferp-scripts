@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ferp.fscp.scripts import sdk
+from ferp.fscp.scripts.common import build_destination
 
 _SUFFIX = ".pdf"
 _MAX_CHARS = 12
@@ -13,19 +14,6 @@ def _derive_name(path: Path) -> str:
     tail = stem[-_MAX_CHARS:] if len(stem) > _MAX_CHARS else stem
     tail = tail or stem or "document"
     return tail
-
-
-def _build_destination(directory: Path, base: str, suffix: str) -> Path:
-    candidate = directory / f"{base}{suffix}"
-    if not candidate.exists():
-        return candidate
-
-    counter = 1
-    while True:
-        candidate = directory / f"{base}_{counter:02d}{suffix}"
-        if not candidate.exists():
-            return candidate
-        counter += 1
 
 
 @sdk.script
@@ -58,7 +46,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             api.log("debug", f"Skipping {pdf.name}: already matches target pattern.")
             continue
 
-        destination = _build_destination(target_dir, new_base, _SUFFIX)
+        destination = build_destination(target_dir, new_base, _SUFFIX)
 
         try:
             pdf.rename(destination)

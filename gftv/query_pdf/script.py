@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-import csv
 import re
 from pathlib import Path
 from typing import Callable, TypedDict
 
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
 from pypdf import PdfReader
 
 from ferp.fscp.scripts import sdk
+from ferp.fscp.scripts.common import collect_files
 
 
 class QueryOptions(TypedDict):
@@ -91,20 +95,62 @@ def _extract_context(text: str, start: int, end: int, context_chars: int) -> str
     return snippet
 
 
-def _write_csv(csv_path: Path, rows: list[dict[str, object]]) -> None:
-    fieldnames = [
+def _write_xlsx(xlsx_path: Path, rows: list[dict[str, object]]) -> None:
+    headers = [
         "file_name",
         "relative_path",
         "page_number",
         "match_text",
         "context_excerpt",
     ]
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    with csv_path.open("w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+    wb = Workbook()
+    ws = wb.active
+    if ws is None:
+        ws = wb.create_sheet()
+    ws.title = "Query Results"
+
+    header_font = Font(bold=True)
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    data_alignment = Alignment(vertical="top", wrap_text=True)
+    centered_alignment = Alignment(
+        horizontal="center", vertical="center", wrap_text=True
+    )
+
+    ws.append([header.replace("_", " ").title() for header in headers])
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.alignment = header_alignment
+
+    for row in rows:
+        ws.append([row.get(key, "") for key in headers])
+
+    last_row = max(1, len(rows) + 1)
+    last_col = len(headers)
+    table_ref = f"A1:{get_column_letter(last_col)}{last_row}"
+    table = Table(displayName="QueryResults", ref=table_ref)
+    table.tableStyleInfo = TableStyleInfo(
+        name="TableStyleLight1",
+        showFirstColumn=False,
+        showLastColumn=False,
+        showRowStripes=True,
+        showColumnStripes=False,
+    )
+    ws.add_table(table)
+
+    for col_idx in range(1, len(headers) + 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 24
+
+    ws.column_dimensions["E"].width = 80
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            if cell.column in (3, 4):
+                cell.alignment = centered_alignment
+            else:
+                cell.alignment = data_alignment
+
+    xlsx_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(xlsx_path)
 
 
 @sdk.script
@@ -167,20 +213,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             return
 
     target_path = ctx.target_path
+    pdf_files = collect_files(
+        target_path,
+        "*.pdf",
+        recursive=False,
+        check_cancel=api.check_cancel,
+    )
     root_path = target_path if ctx.target_kind == "directory" else target_path.parent
-    if ctx.target_kind == "file":
-        if target_path.suffix.lower() != ".pdf":
-            api.emit_result(
-                {
-                    "_status": "warn",
-                    "_title": "Warning",
-                    "Info": "Select a .pdf file or a directory to query.",
-                }
-            )
-            return
-        pdf_files = [target_path]
-    else:
-        pdf_files = sorted(root_path.rglob("*.pdf"))
     total_files = len(pdf_files)
     if not total_files:
         api.emit_result(
@@ -227,14 +266,14 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             matches.extend(pdf_matches)
             files_with_matches.add(pdf_path)
 
-    csv_path: Path | None = None
+    xlsx_path: Path | None = None
     if matches:
         stem = target_path.stem if ctx.target_kind == "file" else root_path.name
         output_dir = (
             target_path.parent if ctx.target_kind == "file" else root_path.parent
         )
-        csv_path = output_dir / f"{stem}_query_results.csv"
-        _write_csv(csv_path, matches)
+        xlsx_path = output_dir / f"{stem}_query_results.xlsx"
+        _write_xlsx(xlsx_path, matches)
 
     api.emit_result(
         {
@@ -242,7 +281,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             "Query": query,
             "Files Searched": total_files,
             "Files With Matches": len(files_with_matches),
-            "CSV Path": str(csv_path) if csv_path else None,
+            "XLSX Path": str(xlsx_path) if xlsx_path else None,
         }
     )
 

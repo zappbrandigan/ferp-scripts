@@ -31,5 +31,5 @@ from the filename plus the episode number or air date found on page 1.
 
 ## Notes
 
-- If files in `_check/` include `_2`, `_3`, etc., the file may be a duplicate or there was insufficient information to rename automatically.
+- If files in `_check/` include `_02`, `_03`, etc., the file may be a duplicate or there was insufficient information to rename automatically.
 - The selected directory must be accessible; the script aborts if it cannot read or write in place.

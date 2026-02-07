@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from pathlib import Path
 from typing import TypedDict
 
 from ferp.fscp.scripts import sdk
+from ferp.fscp.scripts.common import (
+    build_archive_destination,
+    build_destination,
+    collect_files,
+    load_settings,
+    move_to_dir,
+    save_settings,
+)
 
 
 class UserResponse(TypedDict):
@@ -14,62 +21,8 @@ class UserResponse(TypedDict):
     overwrite: bool
 
 
-def _collect_html_files(root: Path, recursive: bool) -> list[Path]:
-    if root.is_file():
-        return [root]
-    if recursive:
-        return sorted(path for path in root.rglob("*.html") if path.is_file())
-    return sorted(path for path in root.glob("*.html") if path.is_file())
-
-
-def _build_destination(directory: Path, base: str, overwrite: bool) -> Path:
-    candidate = directory / f"{base}.pdf"
-    if overwrite or not candidate.exists():
-        return candidate
-
-    counter = 1
-    while True:
-        candidate = directory / f"{base}_{counter:02d}.pdf"
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
-def _build_archive_destination(directory: Path, filename: str) -> Path:
-    candidate = directory / filename
-    if not candidate.exists():
-        return candidate
-
-    base = candidate.stem
-    suffix = candidate.suffix
-    counter = 1
-    while True:
-        candidate = directory / f"{base}_{counter:02d}{suffix}"
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
-def _load_settings(settings_path: Path) -> dict[str, object]:
-    if not settings_path.exists():
-        return {}
-    try:
-        return json.loads(settings_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _save_settings(settings_path: Path, payload: dict[str, object]) -> str | None:
-    try:
-        settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text(json.dumps(payload, indent=4))
-    except Exception as exc:
-        return f"Unable to save settings: {exc}"
-    return None
-
-
-def _resolve_chrome_path(settings_path: Path, api: sdk.ScriptAPI) -> str | None:
-    settings = _load_settings(settings_path)
+def _resolve_chrome_path(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> str | None:
+    settings = load_settings(ctx)
     integrations = settings.get("integrations", {})
     chrome_config = (
         integrations.get("chrome", {}) if isinstance(integrations, dict) else {}
@@ -95,7 +48,7 @@ def _resolve_chrome_path(settings_path: Path, api: sdk.ScriptAPI) -> str | None:
             chrome_config = integrations.setdefault("chrome", {})
             if isinstance(chrome_config, dict):
                 chrome_config["path"] = str(candidate)
-                save_error = _save_settings(settings_path, settings)
+                save_error = save_settings(ctx, settings)
                 if save_error:
                     api.emit_result(
                         {
@@ -165,16 +118,6 @@ def _convert_html_to_pdf(
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     root = ctx.target_path
-    if not root.exists():
-        api.emit_result(
-            {
-                "_status": "error",
-                "_title": "Missing Path",
-                "Info": "Select a file or directory and try again.",
-            }
-        )
-        return
-
     overwrite = False
     recursive = False
     if ctx.target_kind == "directory":
@@ -191,15 +134,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             ],
             show_text_input=False,
         )
-        if not options:
-            api.emit_result(
-                {
-                    "_status": "warn",
-                    "_title": "HTML Conversion Canceled",
-                    "Info": "No files were modified.",
-                }
-            )
-            return
         recursive = bool(options.get("recursive", False))
 
     settings = UserResponse(
@@ -210,7 +144,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     if ctx.target_kind == "file":
         html_files = [root] if root.suffix.lower() == ".html" else []
     else:
-        html_files = _collect_html_files(root, settings["recursive"])
+        html_files = collect_files(root, "*.html", settings["recursive"])
         html_files = [path for path in html_files if path.suffix.lower() == ".html"]
     if not html_files:
         api.emit_result(
@@ -222,20 +156,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         )
         return
 
-    env_paths = ctx.environment.get("paths", {})
-    settings_path_value = env_paths.get("settings_file")
-    settings_path = Path(settings_path_value) if settings_path_value else None
-    if settings_path is None:
-        api.emit_result(
-            {
-                "_status": "error",
-                "_title": "Missing Settings Path",
-                "Info": "Settings file path is not available.",
-            }
-        )
-        return
-
-    chrome_path = _resolve_chrome_path(settings_path, api)
+    chrome_path = _resolve_chrome_path(ctx, api)
     if not chrome_path:
         api.emit_result(
             {
@@ -253,12 +174,25 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     total = len(html_files)
     for index, html_file in enumerate(html_files, start=1):
-        api.progress(current=index, total=total, message=f"Converting {html_file.name}")
+        api.progress(
+            current=index,
+            total=total,
+            unit="files",
+            message=f"Converting {html_file.name}",
+        )
         if ctx.target_kind == "file":
-            destination = _build_destination(html_file.parent, html_file.stem, False)
+            destination = build_destination(
+                html_file.parent,
+                html_file.stem,
+                ".pdf",
+                overwrite=False,
+            )
         else:
-            destination = _build_destination(
-                html_file.parent, html_file.stem, settings["overwrite"]
+            destination = build_destination(
+                html_file.parent,
+                html_file.stem,
+                ".pdf",
+                overwrite=settings["overwrite"],
             )
         error = _convert_html_to_pdf(html_file, destination, chrome_path)
         if error:
@@ -267,11 +201,15 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             converted += 1
             try:
                 archive_dir = html_file.parent / "_og"
-                archive_dir.mkdir(exist_ok=True)
-                archive_destination = _build_archive_destination(
+                archive_destination = build_archive_destination(
                     archive_dir, html_file.name
                 )
-                html_file.replace(archive_destination)
+                move_to_dir(
+                    html_file,
+                    archive_dir,
+                    base=archive_destination.stem,
+                    use_shutil=True,
+                )
                 moved += 1
             except Exception as exc:
                 move_failures.append(f"{html_file.name}: {exc}")

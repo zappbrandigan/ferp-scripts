@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from ferp.fscp.scripts import sdk
+from ferp.fscp.scripts.common import build_destination, collect_files
 
 
 class UserResponse(TypedDict):
@@ -63,27 +64,6 @@ def _page_setup(worksheet, print_area, autocolumn):
     worksheet.PageSetup.PrintArea = print_area
 
 
-def _collect_excel_files(root: Path, recursive: bool) -> list[Path]:
-    if root.is_file():
-        return [root]
-    if recursive:
-        return sorted(path for path in root.rglob("*.xls*") if path.is_file())
-    return sorted(path for path in root.glob("*.xls*") if path.is_file())
-
-
-def _build_destination(directory: Path, base: str, suffix: str) -> Path:
-    candidate = directory / f"{base}{suffix}"
-    if not candidate.exists():
-        return candidate
-
-    counter = 1
-    while True:
-        candidate = directory / f"{base}_{counter:02d}{suffix}"
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
 def _export_pdf(workbook, out_file: Path) -> None:
     workbook.ExportAsFixedFormat(0, str(out_file))
 
@@ -132,7 +112,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     is_test = payload["test"]
 
     target = ctx.target_path
-    xl_files = _collect_excel_files(target, recursive=recursive)
+    xl_files = collect_files(
+        target,
+        "*.xls*",
+        recursive=recursive,
+        check_cancel=api.check_cancel,
+    )
     total_files = len(xl_files)
 
     if ctx.environment["host"]["platform"] != "win32":
@@ -187,7 +172,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             workbook = None
             try:
                 workbook = xl_window.Workbooks.Open(str(file_path))
-                out_path = _build_destination(file_path.parent, file_path.stem, ".pdf")
+                out_path = build_destination(file_path.parent, file_path.stem, ".pdf")
                 _export_pdf(workbook, out_path)
                 converted.append(str(out_path))
                 api.progress(current=index, total=total_files, unit="files")

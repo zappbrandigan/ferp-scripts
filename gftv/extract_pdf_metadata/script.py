@@ -10,18 +10,13 @@ from typing import TypedDict
 from pypdf import PdfReader
 
 from ferp.fscp.scripts import sdk
+from ferp.fscp.scripts.common import collect_files
 
 
 class UserResponse(TypedDict):
     value: str
     recursive: bool
     write_csv: bool
-
-
-def _collect_pdfs(root: Path, recursive: bool) -> list[Path]:
-    if recursive:
-        return sorted(root.rglob("*.pdf"))
-    return sorted(path for path in root.glob("*.pdf") if path.is_file())
 
 
 def _extract_xmp(reader: PdfReader) -> str | None:
@@ -64,9 +59,7 @@ def _parse_xmp(xmp: str) -> dict[str, object]:
         parsed["ferp:namespace"] = ns["ferp"]
         parsed["ferp:administrator"] = administrator.strip()
 
-    data_added_date = root.findtext(
-        ".//ferp:dataAddedDate", default="", namespaces=ns
-    )
+    data_added_date = root.findtext(".//ferp:dataAddedDate", default="", namespaces=ns)
     if data_added_date.strip():
         parsed["ferp:namespace"] = ns["ferp"]
         parsed["ferp:dataAddedDate"] = data_added_date.strip()
@@ -282,10 +275,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     recursive = payload.get("recursive", False)
     write_csv = payload["write_csv"]
 
-    if ctx.target_kind == "file":
-        pdf_files = [target_path] if target_path.suffix.lower() == ".pdf" else []
-    else:
-        pdf_files = _collect_pdfs(target_path, recursive)
+    pdf_files = collect_files(
+        target_path,
+        "*.pdf",
+        recursive,
+        check_cancel=api.check_cancel,
+    )
     total_files = len(pdf_files)
     if not total_files:
         api.log("warn", f"No PDF files found: {target_path}")
@@ -374,11 +369,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     csv_path: Path | None = None
     if write_csv:
-        stem = (
-            target_path.stem
-            if ctx.target_kind == "file"
-            else target_path.name
-        )
+        stem = target_path.stem if ctx.target_kind == "file" else target_path.name
         csv_path = base_dir / f"{stem}_pdf_metadata.csv"
         _write_csv(csv_path, rows)
 

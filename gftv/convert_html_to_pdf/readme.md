@@ -6,7 +6,7 @@ Converts HTML files to PDF using a local Chrome/Chromium install.
 
 ## FERP Integration
 
-- Operates on a highlighted directory or a single `.html` file in the File Navigator.
+- Operates on a `highlighted directory` or `highlighted file` of type `.html` in the File Navigator.
 - Prompts for recursive scan when a directory is targeted.
 - Emits per-file progress and reports failures without stopping the batch.
 
@@ -27,3 +27,12 @@ Converts HTML files to PDF using a local Chrome/Chromium install.
 ## Notes
 
 - Requires a valid Chrome/Chromium path (stored in the script settings).
+- Typical Mac OS path: /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome
+- On Windows, you can identify the path by following these steps:
+    1. Click Start
+    2. Type Chrome
+    3. Right-click Google Chrome
+    4. Click Open file location
+    5. In the folder that opens, right-click Google Chrome
+    6. Click Properties
+    7. Copy the Target path

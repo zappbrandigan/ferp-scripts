@@ -6,6 +6,7 @@ from pathlib import Path
 import pdfplumber
 
 from ferp.fscp.scripts import sdk
+from ferp.fscp.scripts.common import build_destination, move_to_dir
 
 _SUFFIX = ".pdf"
 _NEEDS_OCR_DIRNAME = "_needs_ocr"
@@ -67,26 +68,6 @@ def _derive_name(path: Path, text: str) -> str:
     return _sanitize_filename(stem.strip())
 
 
-def _build_destination(directory: Path, base: str, suffix: str) -> Path:
-    candidate = directory / f"{base}{suffix}"
-    if not candidate.exists():
-        return candidate
-
-    counter = 1
-    while True:
-        candidate = directory / f"{base}_{counter:02d}{suffix}"
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
-def _move_to_dir(path: Path, directory: Path, base: str | None = None) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    name_base = base if base is not None else path.stem
-    destination = _build_destination(directory, name_base, path.suffix)
-    return path.rename(destination)
-
-
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     target_dir = Path(ctx.target_path)
@@ -134,7 +115,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         text = _extract_first_page_text(pdf)
         if not text:
             try:
-                _move_to_dir(pdf, target_dir / _NEEDS_OCR_DIRNAME)
+                move_to_dir(pdf, target_dir / _NEEDS_OCR_DIRNAME)
                 needs_ocr += 1
                 api.log(
                     "info", f"Moved '{pdf.name}' to '{_NEEDS_OCR_DIRNAME}' (no text)."
@@ -151,7 +132,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 skipped += 1
                 check_dir = target_dir / _CHECK_DIRNAME
                 try:
-                    moved = _move_to_dir(pdf, check_dir)
+                    moved = move_to_dir(pdf, check_dir)
                     check += 1
                     api.log(
                         "warn",
@@ -167,7 +148,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 if pdf.name == new_name:
                     check_dir = target_dir / _CHECK_DIRNAME
                     try:
-                        moved = _move_to_dir(pdf, check_dir, new_base)
+                        moved = move_to_dir(pdf, check_dir, base=new_base)
                         check += 1
                         api.log(
                             "warn",
@@ -185,11 +166,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     if base_destination.exists():
                         check_dir = target_dir / _CHECK_DIRNAME
                         try:
-                            existing_destination = _move_to_dir(
-                                base_destination, check_dir, new_base
+                            existing_destination = move_to_dir(
+                                base_destination, check_dir, base=new_base
                             )
-                            incoming_destination = _move_to_dir(
-                                pdf, check_dir, new_base
+                            incoming_destination = move_to_dir(
+                                pdf, check_dir, base=new_base
                             )
                             check += 1
                             api.log(
@@ -207,7 +188,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                                 "error", f"Failed to move conflict '{pdf.name}': {exc}"
                             )
                     else:
-                        destination = _build_destination(target_dir, new_base, _SUFFIX)
+                        destination = build_destination(target_dir, new_base, _SUFFIX)
 
                         try:
                             pdf.rename(destination)

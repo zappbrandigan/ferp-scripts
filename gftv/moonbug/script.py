@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from ferp.fscp.scripts import sdk
+from ferp.fscp.scripts.common import build_destination, collect_files, move_to_dir
 
 
 class UserResponse(TypedDict):
@@ -121,60 +122,13 @@ def _escape_file_name(file_name):
     return re.sub(r"[<>:\\\"/|?!*]", "", file_name)
 
 
-def _build_destination(
-    directory: Path,
-    base: str,
-    suffix: str,
-    force_suffix: bool = False,
-) -> Path:
-    candidate = directory / f"{base}{suffix}"
-    if not candidate.exists() and not force_suffix:
-        return candidate
-
-    counter = 1
-    while True:
-        candidate = directory / f"{base}_{counter:02d}{suffix}"
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
-def _export_pdf(worksheet, out_file):
-    """Export Excel worksheet to pdf."""
-    worksheet.ExportAsFixedFormat(0, str(out_file))
-
-
-def _ensure_dir(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-
-
-def _move_to_dir(source: Path, destination_dir: Path) -> Path:
-    if source.parent == destination_dir:
-        return source
-    _ensure_dir(destination_dir)
-    destination = _build_destination(destination_dir, source.stem, source.suffix)
-    shutil.move(str(source), destination)
-    return destination
+def _export_pdf(workbook, out_file):
+    """Export Excel workbook to pdf."""
+    workbook.ExportAsFixedFormat(0, str(out_file))
 
 
 def _is_in_named_dir(path: Path, dir_name: str) -> bool:
     return any(parent.name == dir_name for parent in path.parents)
-
-
-def _is_in_underscore_dir(path: Path) -> bool:
-    return any(parent.name.startswith("_") for parent in path.parents)
-
-
-def _collect_excel_files(root: Path, recursive: bool) -> list[Path]:
-    if root.is_file():
-        return [root]
-    if recursive:
-        return sorted(
-            path
-            for path in root.rglob("*.xls*")
-            if path.is_file() and not _is_in_underscore_dir(path)
-        )
-    return sorted(path for path in root.glob("*.xls*") if path.is_file())
 
 
 @sdk.script
@@ -221,7 +175,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     is_test = payload["test"]
 
     root_path = ctx.target_path
-    xl_files = _collect_excel_files(root_path, recursive=recursive)
+    xl_files = collect_files(
+        root_path,
+        "*.xls*",
+        recursive=recursive,
+        check_cancel=api.check_cancel,
+    )
     total_files = len(xl_files)
 
     if ctx.environment["host"]["platform"] != "win32":
@@ -266,7 +225,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     else:
         api.log("info", f"Moonbug Excel to PDF | Files found={total_files}")
 
-    xl_window = _start_excel()
+    try:
+        xl_window = _start_excel()
+    except Exception:
+        gen_py = Path(Path.home(), "AppData", "Local", "Temp", "gen_py")
+        shutil.rmtree(gen_py, ignore_errors=True)
+        xl_window = _start_excel()
+
     base_name_map_by_dir: dict[Path, dict[str, Path | None]] = {}
     moved_to_check: set[Path] = set()
     moved_to_none: set[Path] = set()
@@ -297,16 +262,19 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 base_pdf = parent_dir / f"{base_name}.pdf"
                 preexisting_base_pdf = base_pdf.exists()
                 collision = base_name in base_name_map or preexisting_base_pdf
-                destination = _build_destination(
-                    parent_dir, base_name, ".pdf", force_suffix=collision
+                destination = build_destination(
+                    parent_dir,
+                    base_name,
+                    ".pdf",
+                    force_suffix=collision,
                 )
-                _export_pdf(worksheet, destination)
+                _export_pdf(workbook, destination)
                 converted.append(str(destination))
                 api.progress(
                     current=index,
                     total=total_files,
                     unit="files",
-                    message=f"Converting files in {parent_dir}",
+                    message=f"Converting files in {parent_dir.name}",
                 )
                 if base_name not in base_name_map:
                     base_name_map[base_name] = None if preexisting_base_pdf else file
@@ -319,35 +287,35 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             if base_name and destination:
                 if is_none_vrsn:
                     if destination.exists():
-                        _move_to_dir(destination, none_dir)
+                        move_to_dir(destination, none_dir, use_shutil=True)
                     if file.exists() and file not in moved_to_none:
-                        _move_to_dir(file, none_dir)
+                        move_to_dir(file, none_dir, use_shutil=True)
                         moved_to_none.add(file)
                     if base_pdf is not None and base_pdf.exists():
-                        _move_to_dir(base_pdf, none_dir)
+                        move_to_dir(base_pdf, none_dir, use_shutil=True)
                     original_excel = base_name_map.get(base_name)
                     if (
                         original_excel is not None
                         and original_excel.exists()
                         and original_excel not in moved_to_none
                     ):
-                        _move_to_dir(original_excel, none_dir)
+                        move_to_dir(original_excel, none_dir, use_shutil=True)
                         moved_to_none.add(original_excel)
                 elif collision:
                     if destination.exists():
-                        _move_to_dir(destination, check_dir)
+                        move_to_dir(destination, check_dir, use_shutil=True)
                     if file.exists() and file not in moved_to_check:
-                        _move_to_dir(file, check_dir)
+                        move_to_dir(file, check_dir, use_shutil=True)
                         moved_to_check.add(file)
                     if base_pdf is not None and base_pdf.exists():
-                        _move_to_dir(base_pdf, check_dir)
+                        move_to_dir(base_pdf, check_dir, use_shutil=True)
                     original_excel = base_name_map.get(base_name)
                     if (
                         original_excel is not None
                         and original_excel.exists()
                         and original_excel not in moved_to_check
                     ):
-                        _move_to_dir(original_excel, check_dir)
+                        move_to_dir(original_excel, check_dir, use_shutil=True)
                         moved_to_check.add(original_excel)
     finally:
         xl_window.Application.Quit()
@@ -366,7 +334,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         if not file.exists():
             continue
         og_dir = file.parent / "_og"
-        _move_to_dir(file, og_dir)
+        move_to_dir(file, og_dir, use_shutil=True)
 
     api.emit_result(
         {

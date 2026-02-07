@@ -7,7 +7,7 @@ of all matches.
 
 ## FERP Integration
 
-- Operates on a highlighted directory or a single `.pdf` file in the File Navigator.
+- Operates on a `highlighted directory` or `highlighted file` of type `.pdf` in the File Navigator.
 - Prompts for the search query and options.
 - Emits per-file progress and logs whenever a file is skipped or fails.
 
@@ -28,8 +28,8 @@ of all matches.
 - Extracts plain text (skipping encrypted/unreadable PDFs with a warning).
 - Records every match with file name, relative path, page number, match text,
   and surrounding context.
-- Writes deterministic CSV results to the same directory as the target file/directory,
-  e.g. `<dir_name>_query_results.csv` or `<file_name>_query_results.csv`.
+- Writes deterministic XLSX results to the directory containing the target,
+  e.g. `<dir_name>_query_results.xlsx` or `<file_name>_query_results.xlsx`.
 
 ## Notes
 

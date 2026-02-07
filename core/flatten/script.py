@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 
 from ferp.fscp.scripts import sdk
+from ferp.fscp.scripts.common import build_destination
 
 
 @sdk.script
@@ -33,12 +34,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     for idx, entry in enumerate(entries, start=1):
         api.check_cancel()
         if entry.is_file():
-            destination = target / entry.name
-            counter = 1
-            while destination.exists():
-                destination = target / f"{entry.stem}_{counter}{entry.suffix}"
-                counter += 1
-
+            destination = build_destination(
+                target,
+                entry.stem,
+                entry.suffix,
+            )
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(entry), destination)
             files_moved += 1

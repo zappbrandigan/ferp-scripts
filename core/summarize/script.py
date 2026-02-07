@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable, Iterator, cast
 
 from ferp.fscp.scripts import sdk
+from ferp.fscp.scripts.common import build_destination
 
 MAX_DEPTH = 4
 
@@ -115,19 +116,6 @@ def _build_summary_table(entries: list[dict[str, object]]) -> str:
     return "\n".join(lines)
 
 
-def _build_destination(directory: Path, base: str, suffix: str) -> Path:
-    candidate = directory.parent / f"{base}{suffix}"
-    if not candidate.exists():
-        return candidate
-
-    counter = 1
-    while True:
-        candidate = directory.parent / f"{base}_{counter:02d}{suffix}"
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
 def _write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -180,7 +168,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     if confirm_export:
         output_dir = root if root.is_dir() else root.parent
         base_name = f"{root.name or 'directory'}_summary"
-        export_path = _build_destination(output_dir, base_name, ".md")
+        export_path = build_destination(
+            output_dir,
+            base_name,
+            ".md",
+            base_dir=output_dir.parent,
+        )
         md_wrapper = "```txt\n{table}\n```"
         try:
             markdown_lines = (
