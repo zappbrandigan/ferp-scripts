@@ -73,7 +73,7 @@
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
       ],
-      "target": ["highlighted_directory"]
+      "target": ["highlighted_directory", "highlighted_file"]
     },
     {
       "id": "gftv.convert_excel",
@@ -83,7 +83,7 @@
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
       ],
-      "target": ["highlighted_directory"]
+      "target": ["highlighted_directory", "highlighted_file"]
     },
     {
       "id": "gftv.convert_html_to_pdf",
