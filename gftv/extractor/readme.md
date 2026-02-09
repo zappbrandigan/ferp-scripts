@@ -7,7 +7,7 @@ archive, writing each message’s files to its own folder.
 
 ## FERP Integration
 
-- Requires you to highlight a `.zip` file or a directory containing Outlook `.msg` emails.
+- Operates on a `highlighted directory` or `highlighted file` of type `.zip` in the File Navigator.
 - Extracted attachments are placed alongside the selected target in
   `<target_name>_attachments/`.
 

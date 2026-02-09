@@ -7,7 +7,7 @@ formats, and tags matched publishers with XMP metadata and a stamped badge.
 
 ## FERP Integration
 
-- Operates on the `highlighted directory` or `highlighted file` of type `.pdf` in the File Navigator.
+- Operates on a `highlighted directory` or `highlighted file` of type `.pdf` in the File Navigator.
 - Prompts for a category code and optional recursive scan.
 - Logs per-file processing details and emits a final summary.
 

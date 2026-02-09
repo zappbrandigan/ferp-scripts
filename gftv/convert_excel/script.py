@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from ferp.fscp.scripts import sdk
 from ferp.fscp.scripts.common import build_destination, collect_files
@@ -10,8 +10,7 @@ from ferp.fscp.scripts.common import build_destination, collect_files
 class UserResponse(TypedDict):
     value: str
     autofitcolumn: bool
-    recursive: bool
-    test: bool
+    recursive: NotRequired[bool]
 
 
 def _start_excel():
@@ -71,8 +70,7 @@ def _export_pdf(workbook, out_file: Path) -> None:
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     confirm = api.confirm(
-        "Before continuing, close all Excel windows/files. "
-        "For best results, run a test first (enable Test mode). Continue?",
+        "Before continuing, close all Excel windows/files. Continue?",
         default=False,
     )
     if not confirm:
@@ -85,31 +83,30 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         )
         return
 
+    recursive_field: sdk.BoolField = {
+        "id": "recursive",
+        "type": "bool",
+        "label": "Recursive",
+        "default": False,
+    }
     payload = api.request_input_json(
         "Options for Excel to PDF Conversion",
         id="convert_excel_options",
         fields=[
-            {
-                "id": "recursive",
-                "type": "bool",
-                "label": "Recursive",
-                "default": False,
-            },
+            *([recursive_field] if ctx.target_kind == "directory" else []),
             {
                 "id": "autofitcolumn",
                 "type": "bool",
                 "label": "Autofit columns",
                 "default": True,
             },
-            {"id": "test", "type": "bool", "label": "Test mode", "default": False},
         ],
         show_text_input=False,
         payload_type=UserResponse,
     )
 
-    recursive = payload["recursive"]
+    recursive = payload.get("recursive", False)
     autofit_colulmn = payload["autofitcolumn"]
-    is_test = payload["test"]
 
     target = ctx.target_path
     xl_files = collect_files(
@@ -132,7 +129,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "Dry Run": True,
                 "Target": str(target),
                 "Recursive": recursive,
-                "Is Test": is_test,
                 "Files Found": total_files,
             }
         )
@@ -155,12 +151,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         )
         return
 
-    if is_test:
-        xl_files = xl_files[:1]
-        total_files = 1
-        api.log("info", "Running in test mode: only processing first file.")
-    else:
-        api.log("info", f"Convert Excel to PDF | Files found={total_files}")
+    api.log("info", f"Convert Excel to PDF | Files found={total_files}")
 
     xl_window = _start_excel()
     converted: list[str] = []
@@ -189,8 +180,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         {
             "_title": "Excel Conversion Summary",
             "Converted": converted,
-            "Is Test": is_test,
-            "Autofit Colum": autofit_colulmn,
+            "Autofit Column": autofit_colulmn,
             "Failures": failures,
             "Files Found": total_files,
         }

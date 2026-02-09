@@ -7,7 +7,7 @@ optional recursive scanning and CSV output.
 
 ## FERP Integration
 
-- Operates on the `highlighted directory` or `highlighted file` of type `.pdf` in the File Navigator.
+- Operates on a `highlighted directory` or `highlighted file` of type `.pdf` in the File Navigator.
 - Prompts for options to enable recursion and CSV output.
 - Streams per-file metadata to the output panel.
 

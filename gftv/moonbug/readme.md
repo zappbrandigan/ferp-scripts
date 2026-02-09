@@ -7,7 +7,7 @@ naming output files from specific worksheet cells.
 
 ## FERP Integration
 
-- Operates on the `highlighted directory` in the File Navigator.
+- Operates on a `highlighted directory` or `highlighted file` of type `.xls*` in the File Navigator.
 - Prompts for options unless arguments are preconfigured.
 - Emits per-file progress and logs failures without stopping the batch.
 
@@ -17,7 +17,6 @@ naming output files from specific worksheet cells.
 2. Run **Convert Moonbug** from the Scripts panel.
 3. Confirm options when prompted:
    - `autofitcolumn` (default true) to auto-size columns before export.
-   - `test` to process only the first file.
 
 ## Behavior
 

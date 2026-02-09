@@ -6,8 +6,8 @@ Validates and normalizes PDF filenames in the highlighted directory so they conf
 
 ## FERP Integration
 
-- Runs against the `highlighted directory` by default (no recursion).
-- Optional recursive mode prompts on launch.
+- Operates on a `highlighted directory` or `highlighted file` of type `.pdf` in the File Navigator.
+- Optional recursive mode prompts when target is a directory.
 - Emits structured logs and result summaries to the output panel.
 - Moves any ambiguous files into `_check/` inside the target directory (or
   each subdirectory when running recursively).

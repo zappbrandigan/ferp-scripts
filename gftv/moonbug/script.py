@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from ferp.fscp.scripts import sdk
 from ferp.fscp.scripts.common import build_destination, collect_files, move_to_dir
@@ -12,8 +12,7 @@ from ferp.fscp.scripts.common import build_destination, collect_files, move_to_d
 class UserResponse(TypedDict):
     value: str
     autofitcolumn: bool
-    recursive: bool
-    test: bool
+    recursive: NotRequired[bool]
 
 
 def _start_excel():
@@ -148,31 +147,31 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         )
         return
 
+    recursive_field: sdk.BoolField = {
+        "id": "recursive",
+        "type": "bool",
+        "label": "Recursive",
+        "default": False,
+    }
+
     payload = api.request_input_json(
         "Options for Moonbug Excel to PDF script",
         id="moonbug_excel_to_pdf_options",
         fields=[
-            {
-                "id": "recursive",
-                "type": "bool",
-                "label": "Recursive",
-                "default": False,
-            },
+            *([recursive_field] if ctx.target_kind == "directory" else []),
             {
                 "id": "autofitcolumn",
                 "type": "bool",
                 "label": "Autofit columns",
                 "default": True,
             },
-            {"id": "test", "type": "bool", "label": "Test mode", "default": False},
         ],
         show_text_input=False,
         payload_type=UserResponse,
     )
 
-    recursive = payload["recursive"]
+    recursive = payload.get("recursive", False)
     autofit_column = payload["autofitcolumn"]
-    is_test = payload["test"]
 
     root_path = ctx.target_path
     xl_files = collect_files(
@@ -194,7 +193,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "_title": "Dry Run Complete",
                 "Dry Run": True,
                 "Target": str(root_path),
-                "Is Test": is_test,
                 "Autofit Column": autofit_column,
                 "Files Found": total_files,
             }
@@ -218,12 +216,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         )
         return
 
-    if is_test:
-        xl_files = xl_files[0:1]
-        total_files = 1
-        api.log("info", "Running in test mode: only processing first file.")
-    else:
-        api.log("info", f"Moonbug Excel to PDF | Files found={total_files}")
+    api.log("info", f"Moonbug Excel to PDF | Files found={total_files}")
 
     try:
         xl_window = _start_excel()
@@ -339,7 +332,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     api.emit_result(
         {
             "_title": "Moonbug Conversion Summary",
-            "Is Test": is_test,
             "Autofit Column": autofit_column,
             "Failures": failures,
             "Files Converted": total_files,

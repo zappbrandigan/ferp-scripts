@@ -6,7 +6,7 @@ Converts Excel workbooks to PDF using the local Excel application.
 
 ## FERP Integration
 
-- Operates on the `highlighted directory` in the File Navigator.
+- Operates on a `highlighted directory` or `highlighted file` of type `.xls*` in the File Navigator.
 - Prompts for options unless arguments are preconfigured.
 - Emits per-file progress and logs failures without stopping the batch.
 

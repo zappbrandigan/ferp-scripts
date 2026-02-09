@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Callable, Coroutine, Iterable, Literal, TypedDict, TypeVar
+from typing import Callable, Coroutine, Literal, NotRequired, TypedDict, TypeVar
 
 try:
     from googletrans import Translator as _GoogleTranslator
@@ -20,6 +19,7 @@ else:
 from unidecode import unidecode
 
 from ferp.fscp.scripts import sdk
+from ferp.fscp.scripts.common.files import collect_files
 
 MAX_FILENAME_LENGTH = 60
 PRODUCTION_DELIM = "   "
@@ -95,7 +95,7 @@ def _article_prefixes() -> tuple[str, ...]:
 
 class UserResponse(TypedDict):
     value: str
-    recursive: bool
+    recursive: NotRequired[bool]
 
 
 @dataclass
@@ -112,39 +112,6 @@ class FileOutcome:
     source: Path
     destination: Path | None
     reason: str | None = None
-
-
-def _iter_directory(
-    root: Path,
-    *,
-    recursive: bool,
-    check_cancel: Callable[[], None] | None = None,
-) -> Iterable[os.DirEntry[str]]:
-    stack = [root]
-    while stack:
-        if check_cancel is not None:
-            check_cancel()
-        current = stack.pop()
-        with os.scandir(current) as entries:
-            for entry in entries:
-                if check_cancel is not None:
-                    check_cancel()
-                if entry.name.startswith(".") or entry.name.startswith("_"):
-                    continue
-                try:
-                    is_dir = entry.is_dir(follow_symlinks=False)
-                    is_file = entry.is_file(follow_symlinks=False)
-                    is_link = entry.is_symlink()
-                except OSError:
-                    continue
-                if is_dir:
-                    if recursive:
-                        stack.append(Path(entry.path))
-                    continue
-                if not (is_file or is_link):
-                    continue
-                if entry.name.lower().endswith(".pdf"):
-                    yield entry
 
 
 def _parse_name(raw: str) -> tuple[ParsedName | None, str | None]:
@@ -637,63 +604,54 @@ def _rel(root: Path, path: Path | None) -> str:
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     root = ctx.target_path
 
-    payload = api.request_input_json(
-        "This action will rename one or more files. Review your options and confirm to proceed.",
-        id="ferp_normalize_pdf_names",
-        fields=[
-            {
-                "id": "recursive",
-                "type": "bool",
-                "label": "Recursive",
-                "default": False,
-            }
-        ],
-        show_text_input=False,
-        payload_type=UserResponse,
-    )
+    payload: UserResponse | dict = {}
+    if ctx.target_kind == "directory":
+        payload = api.request_input_json(
+            "This action will rename one or more files. Review your options and confirm to proceed.",
+            id="ferp_normalize_pdf_names",
+            fields=[
+                {
+                    "id": "recursive",
+                    "type": "bool",
+                    "label": "Recursive",
+                    "default": False,
+                }
+            ],
+            show_text_input=False,
+            payload_type=UserResponse,
+        )
+    else:
+        confirm = api.confirm(
+            "This action will rename the selected file. Review your options and confirm to proceed.",
+            default=False,
+            id="ferp_normalize_pdf_names",
+        )
+        if not confirm:
+            api.emit_result({"_title": "Operation Cancelled"})
+            return
 
-    recursive = payload["recursive"]
+    recursive = payload.get("recursive", False)
     outcomes: list[FileOutcome] = []
 
-    try:
-        api.check_cancel()
-        entries = list(
-            _iter_directory(root, recursive=recursive, check_cancel=api.check_cancel)
-        )
-    except PermissionError:
-        api.emit_result(
-            {
-                "_status": "error",
-                "_title": "Error: Script Closed",
-                "Info": "Permission denied while listing directory.",
-            }
-        )
-        return
+    entries = collect_files(
+        root,
+        "*.pdf",
+        recursive,
+        check_cancel=api.check_cancel,
+    )
 
     total_entries = len(entries) or 1
 
-    for index, entry in enumerate(entries, start=1):
+    for index, path in enumerate(entries, start=1):
         api.check_cancel()
-        path = Path(entry.path)
         check_dir = path.parent / "_check" if recursive else root / "_check"
 
         api.progress(
             current=index,
             total=total_entries,
             unit="files",
+            message=f"Processing: {path.relative_to(root)}",
         )
-
-        if entry.is_symlink() and not path.exists():
-            outcome = _record_move(outcomes, path, path, check_dir, "broken_symlink")
-            api.log(
-                "info",
-                (
-                    "Moved to _check: "
-                    f"{_rel(root, outcome.source)} -> {_rel(root, outcome.destination)} "
-                    f"(reason: {outcome.reason or 'unknown'})"
-                ),
-            )
-            continue
 
         stem = path.stem
         parsed, reason = _parse_name(stem)
