@@ -1,6 +1,6 @@
 # Attachment Extractor
 
-Pulls non-image attachments from every `.msg` file found inside a `.zip`
+Pulls non-image attachments from every `.msg` or `.eml` file found inside a `.zip`
 archive, writing each message’s files to its own folder.
 
 ---
@@ -13,7 +13,7 @@ archive, writing each message’s files to its own folder.
 
 ## Usage
 
-1. Highlight the `.zip` containing `.msg` files (or a folder with `.msg` files).
+1. Highlight the `.zip` containing `.msg` or `.eml` files (or a folder with them).
 2. Run **Attachment Extractor** from the Scripts panel.
 3. If a `.zip` is selected, the script unpacks the archive to a temporary folder,
    processes `.msg` files, and deletes the temporary data after completion.

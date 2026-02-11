@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import shutil
 import zipfile
+from email import policy
+from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
@@ -150,6 +152,52 @@ def _extract_from_msg(
     return saved
 
 
+def _extract_from_eml(
+    eml_file: Path,
+    output_dir: Path,
+    check_cancel: Callable[[], None] | None = None,
+) -> int:
+    with eml_file.open("rb") as handle:
+        message = BytesParser(policy=policy.default).parse(handle)
+
+    base_len = len(str(output_dir))
+    max_total = WINDOWS_MAX_PATH if os.name == "nt" else None
+    max_component = 120 if os.name == "nt" else None
+
+    safe_stem = _sanitize_component(eml_file.stem, max_component)
+    safe_stem = _fit_components([safe_stem], base_len, max_total)[0]
+    email_output_dir = output_dir / safe_stem
+    email_output_dir.mkdir(parents=True, exist_ok=True)
+
+    saved = 0
+    for part in message.iter_attachments():
+        if check_cancel is not None:
+            check_cancel()
+        name = part.get_filename()
+        if not name:
+            continue
+        ext = Path(name).suffix.lower()
+        if ext in SKIP_EXTENSIONS:
+            continue
+        safe_name = _sanitize_component(name, max_component)
+        safe_name = _fit_components(
+            [safe_name], len(str(email_output_dir)), max_total
+        )[0]
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            continue
+        if isinstance(payload, (bytes, bytearray, memoryview)):
+            payload_bytes = bytes(payload)
+        elif hasattr(payload, "as_bytes"):
+            payload_bytes = payload.as_bytes()
+        else:
+            payload_bytes = str(payload).encode("utf-8")
+        (email_output_dir / safe_name).write_bytes(payload_bytes)
+        saved += 1
+
+    return saved
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     target_path = ctx.target_path
@@ -187,8 +235,9 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         source_dir = temp_dir
 
     msg_files = list(source_dir.rglob("*.msg"))
-    if not msg_files:
-        api.log("warn", "No .msg files found in archive.")
+    eml_files = list(source_dir.rglob("*.eml"))
+    if not msg_files and not eml_files:
+        api.log("warn", "No .msg or .eml files found in archive.")
         if ctx.target_kind == "file":
             shutil.rmtree(temp_dir, ignore_errors=True)
             if output_dir.exists():
@@ -196,7 +245,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         api.emit_result(
             {
                 "_status": "warn",
-                "_title": "Warning: No .msg Files Found",
+                "_title": "Warning: No .msg or .eml Files Found",
                 "Output": None,
                 "Processed Messages": 0,
             }
@@ -204,15 +253,32 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         return
 
     total_saved = 0
+    total_messages = len(msg_files) + len(eml_files)
+    current_index = 0
 
-    for index, msg_file in enumerate(msg_files, start=1):
+    for msg_file in msg_files:
+        current_index += 1
         api.check_cancel()
-        api.progress(current=index, total=len(msg_files), unit="messages", every=10)
+        api.progress(
+            current=current_index, total=total_messages, unit="messages", every=10
+        )
         saved = _extract_from_msg(
             msg_file, output_dir, check_cancel=api.check_cancel
         )
         total_saved += saved
         api.log("info", f"{msg_file.name}: saved {saved} attachment(s)")
+
+    for eml_file in eml_files:
+        current_index += 1
+        api.check_cancel()
+        api.progress(
+            current=current_index, total=total_messages, unit="messages", every=10
+        )
+        saved = _extract_from_eml(
+            eml_file, output_dir, check_cancel=api.check_cancel
+        )
+        total_saved += saved
+        api.log("info", f"{eml_file.name}: saved {saved} attachment(s)")
 
     extracted = True
     if ctx.target_kind == "file":
@@ -222,7 +288,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         {
             "_title": "Attachment Extraction Finished",
             "Output Directory": str(output_dir),
-            "Messages Processed": len(msg_files),
+            "Messages Processed": total_messages,
             "Attachments Extracted": total_saved,
         }
     )
