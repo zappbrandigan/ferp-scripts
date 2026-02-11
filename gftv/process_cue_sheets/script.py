@@ -2811,7 +2811,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                                 {
                                     "id": "territory_codes",
                                     "type": "multi_select",
-                                    "label": f"Publisher catalog codes: {codes_label}",
+                                    "label": f"Publisher catalog codes: {codes_label}\n\nFile: {pdf_path.stem}\n",
                                     "options": split_options,
                                     "default": [],
                                 },
