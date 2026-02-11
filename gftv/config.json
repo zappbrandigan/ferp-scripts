@@ -19,7 +19,7 @@
     {
       "id": "gftv.extractor",
       "name": "Extract: Email Attachments",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "script": "scripts/gftv/extractor/script.py",
       "dependencies": [
         "extract-msg>=0.55.0"
