@@ -111,7 +111,7 @@
     {
       "id": "gftv.convert_word",
       "name": "Convert: Word to PDF",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "script": "scripts/gftv/convert_word/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
@@ -158,7 +158,7 @@
         "pdfplumber>=0.11.8"
       ],
       "target": [
-        "highlighted_directory", 
+        "highlighted_directory",
         "highlighted_file"
       ],
       "file_extensions": [
@@ -192,7 +192,7 @@
     {
       "id": "gftv.process_cue_sheets",
       "name": "Process: Stamp Cue Sheets",
-      "version": "1.4.7",
+      "version": "1.4.8",
       "script": "scripts/gftv/process_cue_sheets/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8",
