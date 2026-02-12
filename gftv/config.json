@@ -73,15 +73,6 @@
       ]
     },
     {
-      "id": "gftv.rename_fox_emails",
-      "name": "Rename: Fox Emails",
-      "version": "1.0.0",
-      "script": "scripts/gftv/rename_fox_emails/script.py",
-      "target": [
-        "highlighted_directory"
-      ]
-    },
-    {
       "id": "gftv.moonbug",
       "name": "Convert: Moonbug to PDF",
       "version": "1.0.6",
@@ -92,6 +83,11 @@
       "target": [
         "highlighted_directory",
         "highlighted_file"
+      ],
+      "file_extensions": [
+        ".xlsx",
+        ".xls",
+        ".xlsm"
       ]
     },
     {
@@ -105,6 +101,27 @@
       "target": [
         "highlighted_directory",
         "highlighted_file"
+      ],
+      "file_extensions": [
+        ".xlsx",
+        ".xls",
+        ".xlsm"
+      ]
+    },
+    {
+      "id": "gftv.convert_word",
+      "name": "Convert: Word to PDF",
+      "version": "1.0.0",
+      "script": "scripts/gftv/convert_word/script.py",
+      "dependencies": [
+        "pywin32>=306; platform_system == \"Windows\""
+      ],
+      "target": [
+        "highlighted_directory",
+        "highlighted_file"
+      ],
+      "file_extensions": [
+        ".docx"
       ]
     },
     {
@@ -130,6 +147,22 @@
       ],
       "target": [
         "highlighted_directory"
+      ]
+    },
+    {
+      "id": "gftv.rename_fox_sports",
+      "name": "Rename: Fox Sports",
+      "version": "1.0.0",
+      "script": "scripts/gftv/rename_fox_sports/script.py",
+      "dependencies": [
+        "pdfplumber>=0.11.8"
+      ],
+      "target": [
+        "highlighted_directory", 
+        "highlighted_file"
+      ],
+      "file_extensions": [
+        ".pdf"
       ]
     },
     {

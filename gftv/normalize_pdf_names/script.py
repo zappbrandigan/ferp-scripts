@@ -650,7 +650,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             current=index,
             total=total_entries,
             unit="files",
-            message=f"Processing: {path.relative_to(root)}",
+            message=f"Normalizing file names in '{path.parent.name}'",
         )
 
         stem = path.stem
