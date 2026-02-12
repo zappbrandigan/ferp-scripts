@@ -346,6 +346,224 @@ def parse_soundmouse(
 
 
 # =================================================
+# WB
+# =================================================
+
+WB_COLUMNS: List[Tuple[str, float, float]] = [
+    ("no", 0, 35),
+    ("selection", 40, 150),
+    ("composer", 150, 275),
+    ("publisher", 275, 475),
+    ("how used", 475, 550),
+    ("time", 550, 600),
+]
+
+WB_HEADER_RE = re.compile(
+    r"no\s*selection\s*composer\s*publisher\s*how\sused\s*time",
+    re.IGNORECASE,
+)
+
+
+def is_wb_pdf(text: str) -> bool:
+    if not text:
+        return False
+
+    score = 0
+
+    # Strong signal: exact column header sequence
+    if WB_HEADER_RE.search(text):
+        score += 3
+
+    # Supporting signals
+    if re.search(r"\bcomposer\b", text, re.IGNORECASE) and re.search(
+        r"\bpublisher\b", text, re.IGNORECASE
+    ):
+        score += 1
+    if re.search(r"\bselection\b", text, re.IGNORECASE):
+        score += 1
+    if re.search(r"\bhow\s*used\b", text, re.IGNORECASE):
+        score += 1
+
+    return score >= 3
+
+
+def wb_extract_words(page):
+    return page.extract_words(
+        use_text_flow=False,
+        keep_blank_chars=False,
+        x_tolerance=1,
+        y_tolerance=3,
+    )
+
+
+def wb_cluster_rows(words, y_tol: float = 3):
+    rows = []
+    for w in sorted(words, key=lambda w: w["top"]):
+        for row in rows:
+            if abs(row[0]["top"] - w["top"]) <= y_tol:
+                row.append(w)
+                break
+        else:
+            rows.append([w])
+
+    for row in rows:
+        row.sort(key=lambda w: w["x0"])
+    return rows
+
+
+def wb_assign_column(x: float) -> Optional[str]:
+    for name, x0, x1 in WB_COLUMNS:
+        if x0 <= x <= x1:
+            return name
+    return None
+
+
+def wb_find_table_start_y(rows) -> Optional[float]:
+    for row in rows:
+        text = " ".join(w["text"] for w in row)
+        if WB_HEADER_RE.search(text):
+            return row[0]["top"]
+    return None
+
+
+def parse_wb(
+    pdf_path: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> list[Dict[str, Any]]:
+    """
+    Parse WB cue sheets into a list of cue dictionaries.
+
+    Grouping rule:
+      - A row with a non-empty "no" starts a new cue dict.
+      - Rows without "no" are continuations of the current cue.
+      - publisher names are all combined in a single string in publisher -> name.
+
+    Output schema:
+      {
+        "no": str,
+        "selection": str | None,
+        "composers": str | None,
+        "publishers": [{"name": ...}],
+        "duration": str | None,
+        "usage": str | None,
+      }
+    """
+    cues: list[Dict[str, Any]] = []
+    current_cue: Optional[Dict[str, Any]] = None
+
+    def flush_current():
+        nonlocal current_cue
+        if current_cue:
+            # Optional: drop completely empty shells
+            has_identity = any(
+                current_cue.get(k) for k in ("selection", "usage", "duration")
+            )
+            has_people = bool(
+                current_cue.get("composers") or current_cue.get("publishers")
+            )
+            if has_identity or has_people:
+                cues.append(current_cue)
+        current_cue = None
+
+    def norm_join(v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+
+    pages_scanned = 0
+    pages_with_tables = 0
+    words_total = 0
+    rows_total = 0
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            if check_cancel is not None:
+                check_cancel()
+            pages_scanned += 1
+            words = wb_extract_words(page)
+            if not words:
+                continue
+            words_total += len(words)
+
+            rows = wb_cluster_rows(words)
+
+            table_start_y = wb_find_table_start_y(rows)
+            if table_start_y is None:
+                continue
+
+            pages_with_tables += 1
+            table_words = [w for w in words if w["top"] > table_start_y]
+            table_rows = wb_cluster_rows(table_words)
+
+            for row in table_rows:
+                if check_cancel is not None:
+                    check_cancel()
+                rows_total += 1
+                record = {name: [] for name, *_ in WB_COLUMNS}
+                for w in row:
+                    col = wb_assign_column(w["x0"])
+                    if col:
+                        record[col].append(w["text"])
+
+                # compact: only keep non-empty joined fields
+                compact = {k: norm_join(" ".join(v)) for k, v in record.items() if v}
+                if not compact:
+                    continue
+
+                cue_no = compact.get("no", "")
+                selection = compact.get("selection", "")
+                composer = compact.get("composer", "")
+                publisher = compact.get("publisher", "")
+                usage = compact.get("how used", "")
+                time = compact.get("time", "")
+                # New cue boundary: cue # present
+                if cue_no:
+                    flush_current()
+                    current_cue = {
+                        "no": cue_no,
+                        "selection": selection,
+                        "composers": composer,
+                        "publishers": [{"name": publisher}] if publisher else [],
+                        "usage": usage,
+                        "time": time,
+                    }
+                else:
+                    # Continuation line: if we don't have a current cue yet, ignore it
+                    if not current_cue:
+                        continue
+
+                # At this point we have a current cue; attach contributor if present
+                if current_cue and composer and not cue_no:
+                    current_cue["composers"] = current_cue["composers"] + " " + composer
+
+                if current_cue and publisher and not cue_no:
+                    if current_cue["publishers"]:
+                        current_cue["publishers"][0]["name"] += " " + publisher
+                    else:
+                        current_cue["publishers"] = [{"name": publisher}]
+
+                if current_cue and usage and not cue_no:
+                    current_cue["usage"] = current_cue["usage"] + " " + usage
+
+                if current_cue and selection and not cue_no:
+                    current_cue["selection"] = (
+                        current_cue["selection"] + " " + selection
+                    )
+
+        flush_current()
+
+    if log_fn:
+        log_fn(
+            "wb parser: "
+            f"pages={pages_scanned} | pages_with_table={pages_with_tables} | "
+            f"words={words_total} | rows={rows_total} | cues={len(cues)}"
+        )
+        # log_fn(f"wb text: cues={cues}")
+    return cues
+
+
+# =================================================
 # RapidCue
 # =================================================
 
@@ -748,7 +966,7 @@ def parse_default(
 # =================================================
 def detect_format(
     pdf_path: Path,
-) -> Literal["soundmouse", "rapidcue", "unknown", "needs_ocr"]:
+) -> Literal["soundmouse", "wb", "rapidcue", "unknown", "needs_ocr"]:
     """
     "needs_ocr" is used when the first page has no extractable text.
     """
@@ -759,6 +977,8 @@ def detect_format(
             return "needs_ocr"
         if is_soundmouse_pdf(text):
             return "soundmouse"
+        if is_wb_pdf(text):
+            return "wb"
         if is_rapidcue_pdf(text):
             return "rapidcue"
     return "unknown"
@@ -767,10 +987,10 @@ def detect_format(
 def filter_logos(cues: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     out: list[Dict[str, Any]] = []
     for cue in cues:
-        title = cue.get("title", "") or ""
-        usage = cue.get("usage")
+        title = cue.get("title", "") or cue.get("selection", "") or ""
+        usage = cue.get("usage") or ""
         notes = cue.get("notes") or []
-        if usage == "EE" or LOGO_RE.search(title):
+        if usage == "EE" or LOGO_RE.search(usage) or LOGO_RE.search(title):
             continue
         if any(LOGO_RE.search(note or "") for note in notes):
             continue
@@ -1076,6 +1296,90 @@ def find_controlled_publishers_present(
 
     found = sorted(found_best_evidence.keys())
 
+    return {
+        "found_controlled_publishers": found,
+        "evidence_by_controlled": found_best_evidence,
+        "unmatched_controlled_publishers": sorted(remaining),
+    }
+
+
+def find_controlled_publishers_present_phrase(
+    filtered_cues: List[Dict[str, Any]],
+    controlled_publishers: List[str],
+    aliases_by_publisher: Dict[str, List[str]] | None = None,
+) -> Dict[str, Any]:
+    """
+    Phrase-containment matcher for WB-like formats.
+    Treats the full publisher text per cue as a blob and checks for controlled
+    publisher phrases within it.
+    """
+    controlled_index = build_controlled_index(
+        controlled_publishers, aliases_by_publisher
+    )
+    remaining = set(controlled_publishers)
+    found_best_evidence: Dict[str, Dict[str, Any]] = {}
+
+    def _contains_phrase(canon_text: str, phrase: str) -> bool:
+        if not canon_text or not phrase:
+            return False
+        start = 0
+        while True:
+            idx = canon_text.find(phrase, start)
+            if idx == -1:
+                return False
+            end = idx + len(phrase)
+            if (idx == 0 or canon_text[idx - 1] == " ") and (
+                end == len(canon_text) or canon_text[end] == " "
+            ):
+                return True
+            start = end
+
+    for cue in filtered_cues:
+        if not remaining:
+            break
+        publishers = cue.get("publishers", [])
+        names: list[str] = []
+        for pub in publishers:
+            if isinstance(pub, dict):
+                name = pub.get("name", "")
+            else:
+                name = str(pub)
+            if name:
+                names.append(name)
+        if not names:
+            continue
+
+        cue_blob = " ".join(names)
+        cue_canon = canonicalize_publisher_name(cue_blob, drop_suffixes=True)
+        if not cue_canon:
+            continue
+
+        for c in controlled_index:
+            if c["controlled"] not in remaining:
+                continue
+            phrase = c["canon"]
+            if not phrase:
+                continue
+            if not _contains_phrase(cue_canon, phrase):
+                continue
+
+            match = {
+                "cue_name": cue_blob,
+                "matched_controlled": c["controlled"],
+                "matched_raw": c["raw"],
+                "score": 1.0,
+                "features": {"phrase": 1.0},
+            }
+
+            prev = found_best_evidence.get(c["controlled"])
+            if prev is None or match["score"] > prev["score"]:
+                found_best_evidence[c["controlled"]] = match
+            remaining.discard(c["controlled"])
+
+        if not remaining:
+            break
+
+    found = sorted(found_best_evidence.keys())
     return {
         "found_controlled_publishers": found,
         "evidence_by_controlled": found_best_evidence,
@@ -2690,6 +2994,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
                     check_cancel=api.check_cancel,
                 )
+            elif fmt == "wb":
+                api.log("debug", f"{pdf_path.name}: detected WB format")
+                raw_cues = parse_wb(
+                    pdf_path,
+                    log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
+                    check_cancel=api.check_cancel,
+                )
             elif fmt == "rapidcue":
                 api.log("debug", f"{pdf_path.name}: detected RapidCue format")
                 raw_cues = parse_rapidcue(
@@ -2730,13 +3041,20 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         f"{pdf_path.name}: skipped_logo_cues={skipped_logos}",
                     )
                 # api.log("debug", f"filtered cues:{filtered_cues}")
-            result = find_controlled_publishers_present(
-                filtered_cues,
-                con_pubs,
-                aliases_by_publisher=observed_name_variants,
-                auto_match_threshold=0.92,
-                review_threshold=0.85,
-            )
+            if fmt == "wb":
+                result = find_controlled_publishers_present_phrase(
+                    filtered_cues,
+                    con_pubs,
+                    aliases_by_publisher=observed_name_variants,
+                )
+            else:
+                result = find_controlled_publishers_present(
+                    filtered_cues,
+                    con_pubs,
+                    aliases_by_publisher=observed_name_variants,
+                    auto_match_threshold=0.92,
+                    review_threshold=0.85,
+                )
             matched_publishers = result.get("found_controlled_publishers", [])
             accuracy_audits = result.get("evidence_by_controlled", {})
         matched_main = [p for p in matched_publishers if p in main_pub_set]

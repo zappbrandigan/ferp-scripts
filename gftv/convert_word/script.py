@@ -116,20 +116,27 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             api.check_cancel()
             document = None
             destination = file.with_suffix(".pdf")
+            converted_this = False
             try:
                 if destination.exists():
                     destination.unlink()
                 document = word_window.Documents.Open(str(file), ReadOnly=True)
                 _export_pdf(document, destination)
+                converted_this = True
                 converted += 1
-                og_dir = file.parent / _OG_DIRNAME
-                move_to_dir(file, og_dir, use_shutil=True)
             except Exception as exc:
                 api.log("warn", f"Failed to process '{file}': {exc}")
                 failures.append(f"{file}: {exc}")
             finally:
                 if document is not None:
                     document.Close(SaveChanges=False)
+            if converted_this:
+                try:
+                    og_dir = file.parent / _OG_DIRNAME
+                    move_to_dir(file, og_dir, use_shutil=True)
+                except Exception as exc:
+                    api.log("warn", f"Failed to archive '{file}': {exc}")
+                    failures.append(f"{file}: archive failed: {exc}")
             api.progress(
                 current=index,
                 total=total_files,
