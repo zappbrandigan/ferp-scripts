@@ -108,14 +108,14 @@ class CombinedTerritoryEntry(TypedDict):
 # =================================================
 
 SOUNDMOUSE_COLUMNS: List[Tuple[str, float, float]] = [
-    ("cue #", 0, 35),
-    ("reel #", 35, 65),
-    ("title", 65, 225),
-    ("role", 225, 250),
-    ("name", 250, 340),
-    ("society", 340, 450),
-    ("usage", 450, 505),
-    ("duration", 505, 595),
+    ("cue #", 0, 39),
+    ("reel #", 40, 65),
+    ("title", 97, 230),
+    ("role", 231, 267),
+    ("name", 268, 400),
+    ("society", 401, 480),
+    ("usage", 481, 515),
+    ("duration", 516, 600),
 ]
 
 SOUNDMOUSE_HEADER_RE = re.compile(
@@ -354,11 +354,11 @@ def parse_soundmouse(
 
 WB_COLUMNS: List[Tuple[str, float, float]] = [
     ("no", 0, 35),
-    ("selection", 40, 150),
-    ("composer", 150, 275),
-    ("publisher", 275, 475),
-    ("how used", 475, 550),
-    ("time", 550, 600),
+    ("selection", 40, 140),
+    ("composer", 145, 275),
+    ("publisher", 280, 480),
+    ("how used", 485, 555),
+    ("time", 558, 600),
 ]
 
 WB_HEADER_RE = re.compile(
@@ -562,7 +562,7 @@ def parse_wb(
             f"pages={pages_scanned} | pages_with_table={pages_with_tables} | "
             f"words={words_total} | rows={rows_total} | cues={len(cues)}"
         )
-        # log_fn(f"wb text: cues={cues}")
+        log_fn(f"wb text: cues={cues}")
     return cues
 
 
