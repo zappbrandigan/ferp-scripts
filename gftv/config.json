@@ -140,7 +140,7 @@
     {
       "id": "gftv.rename_uvs",
       "name": "Rename: UVS",
-      "version": "1.0.2",
+      "version": "1.0.3",
       "script": "scripts/gftv/rename_uvs/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8"
@@ -192,7 +192,7 @@
     {
       "id": "gftv.process_cue_sheets",
       "name": "Process: Stamp Cue Sheets",
-      "version": "1.4.8",
+      "version": "1.4.9",
       "script": "scripts/gftv/process_cue_sheets/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8",
