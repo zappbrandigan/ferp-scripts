@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import ctypes
+import getpass
 import json
 import logging
 import math
 import os
+import platform
 import re
 import shutil
+import subprocess
 import tempfile
 import unicodedata
 import warnings
 from collections import Counter
+from ctypes import wintypes
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict, cast
@@ -1796,6 +1801,7 @@ def _add_stamp_annotation(
                 [NumberObject(0), NumberObject(0), NumberObject(0)]
             ),
             NameObject("/F"): NumberObject(4),
+            NameObject("/T"): TextStringObject(USER_NAME),
             NameObject("/NM"): TextStringObject(stamp_name),
         }
     )
@@ -2598,6 +2604,36 @@ def build_agreements_for_groups(
     return agreements
 
 
+def get_display_name():
+    system = platform.system()
+
+    if system == "Windows":
+        try:
+            GetUserNameEx = ctypes.windll.secur32.GetUserNameExW  # type: ignore
+            NameDisplay = 3
+            size = wintypes.ULONG(0)
+            if not GetUserNameEx(NameDisplay, None, ctypes.byref(size)):
+                return getpass.getuser()
+            if size.value == 0:
+                return getpass.getuser()
+            buffer = ctypes.create_unicode_buffer(size.value)
+            if not GetUserNameEx(NameDisplay, buffer, ctypes.byref(size)):
+                return getpass.getuser()
+            return buffer.value or getpass.getuser()
+        except Exception:
+            return getpass.getuser()
+
+    elif system == "Darwin":
+        try:
+            result = subprocess.run(["id", "-F"], capture_output=True, text=True)
+            display_name = result.stdout.strip()
+            return display_name or getpass.getuser()
+        except Exception:
+            return getpass.getuser()
+
+    return getpass.getuser()
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     env_paths = ctx.environment.get("paths", {})
@@ -2614,6 +2650,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         return
 
     target_dir = ctx.target_path
+    global USER_NAME
+    USER_NAME = get_display_name()
 
     with cache_path.open("r", encoding="utf-8") as handle:
         pubs = json.load(handle)

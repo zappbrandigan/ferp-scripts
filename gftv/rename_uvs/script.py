@@ -34,25 +34,54 @@ def _normalize_year(year: str) -> str:
     return year
 
 
+def _normalize_episode_digits(value: str) -> str:
+    return re.sub(r"\D+", "", value)
+
+
+def _sanitize_episode_suffix(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "", value)
+
+
+def _episode_matches_air_date(episode_digits: str, air_date: str) -> bool:
+    air_date_short = air_date[0:4] + air_date[6:8]
+    return episode_digits in {air_date, air_date_short}
+
+
 def _extract_episode_value(text: str) -> str:
     episode_match = re.search(r"Episode Number:\s*([^\s]+)", text)
-    if episode_match:
-        episode_number = episode_match.group(1)
-        if re.fullmatch(r"\d+", episode_number) and 3 <= len(episode_number) <= 5:
-            return episode_number
+    episode_number = episode_match.group(1) if episode_match else None
+    episode_digits = (
+        _normalize_episode_digits(episode_number) if episode_number else None
+    )
 
     air_date_match = re.search(
         r"(?:Air Date|Air/Release Date):\s*(?P<month>\d{1,2})/"
         r"(?P<day>\d{1,2})/(?P<year>\d{2,4})",
         text,
     )
-    if not air_date_match:
-        raise ValueError("No suitable episode number or air date found on page 1.")
-    month, day, year = air_date_match.groups()
-    day = f"{int(day):02d}"
-    month = f"{int(month):02d}"
-    year = _normalize_year(year)
-    return f"{day}{month}{year}"
+    air_date = None
+    if air_date_match:
+        month, day, year = air_date_match.groups()
+        day = f"{int(day):02d}"
+        month = f"{int(month):02d}"
+        year = _normalize_year(year)
+        air_date = f"{day}{month}{year}"
+
+    if air_date:
+        suffix = _sanitize_episode_suffix(episode_number) if episode_number else ""
+        if (
+            episode_digits
+            and suffix
+            and len(suffix) <= 5
+            and not _episode_matches_air_date(episode_digits, air_date)
+        ):
+            return f"{air_date}-{suffix}"
+        return air_date
+
+    if episode_number:
+        return episode_number
+
+    raise ValueError("No suitable episode number or air date found on page 1.")
 
 
 def _derive_name(path: Path, text: str) -> str:

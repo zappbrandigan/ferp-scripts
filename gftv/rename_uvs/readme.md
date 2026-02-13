@@ -20,11 +20,12 @@ from the filename plus the episode number or air date found on page 1.
 ## Behavior
 
 - Derives the production title from the filename pattern `<title> - ...`.
-- Uses `Episode Number` only when it is numeric and 3–5 digits; otherwise uses
-  `Air Date` or `Air/Release Date`.
-  `Air Date` accepts `MM/DD/YY` or `MM/DD/YYYY` and is formatted as `DDMMYYYY`.
-- Produces `PRODUCTION   Ep No. <value>.pdf` where `<value>` is the episode number
-  or the formatted air date (three spaces before `Ep`).
+- Uses a combination of `Air Date` and `Episode Number`:
+  - Uses `Air Date` or `Air/Release Date` from cue sheet contents
+  - `Air Date` accepts `MM/DD/YY` or `MM/DD/YYYY` and is formatted as `DDMMYYYY`
+  - Adds episode number as suffix when present, distinct from air date, and is 5 characters or less
+  - Removes special characters form episode number
+- Produces `PRODUCTION   Ep No. <air_date>.pdf` or `PRODUCTION   Ep No. <air_date>-<episode_number>.pdf` 
 - Moves files with no extractable text into `_needs_ocr/`.
 - When a name collision occurs, moves both the incoming file and the existing target file into `_check/`.
 - Moves any other skipped files into `_check/`.
