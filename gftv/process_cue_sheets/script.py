@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-import ctypes
 import getpass
 import json
 import logging
 import math
 import os
-import platform
 import re
 import shutil
-import subprocess
 import tempfile
 import unicodedata
 import warnings
 from collections import Counter
-from ctypes import wintypes
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypedDict, cast
@@ -328,6 +324,8 @@ def parse_soundmouse(
                     elif r == "E":
                         last_seen_role = r
                         current_cue["publishers"].append(entry)
+                    elif r == "AM":
+                        last_seen_role = r
                     else:
                         # Handle text line wrape with no role by using last seen role in this cue
                         if re.match(r"\d{5,}$", name):
