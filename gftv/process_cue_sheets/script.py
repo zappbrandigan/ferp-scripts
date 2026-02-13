@@ -1818,21 +1818,19 @@ def _add_stamp_annotation(
         if not isinstance(annots_array, ArrayObject):
             annots_array = ArrayObject([annots_array])
 
-    if stamp_name:
-        cleaned = ArrayObject()
-        for item in annots_array:
-            try:
-                item_obj = item.get_object()
-            except AttributeError:
-                item_obj = item
-            if not isinstance(item_obj, DictionaryObject):
-                cleaned.append(item)
-                continue
-            nm_value = item_obj.get("/NM")
-            if nm_value == stamp_name:
-                continue
+    cleaned = ArrayObject()
+    for item in annots_array:
+        try:
+            item_obj = item.get_object()
+        except AttributeError:
+            item_obj = item
+        if not isinstance(item_obj, DictionaryObject):
             cleaned.append(item)
-        annots_array = cleaned
+            continue
+        if item_obj.get("/Subtype") == NameObject("/Stamp"):
+            continue
+        cleaned.append(item)
+    annots_array = cleaned
 
     annots_array.append(annot_ref)
     page[NameObject("/Annots")] = annots_array
@@ -2604,36 +2602,6 @@ def build_agreements_for_groups(
     return agreements
 
 
-def get_display_name():
-    system = platform.system()
-
-    if system == "Windows":
-        try:
-            GetUserNameEx = ctypes.windll.secur32.GetUserNameExW  # type: ignore
-            NameDisplay = 3
-            size = wintypes.ULONG(0)
-            if not GetUserNameEx(NameDisplay, None, ctypes.byref(size)):
-                return getpass.getuser()
-            if size.value == 0:
-                return getpass.getuser()
-            buffer = ctypes.create_unicode_buffer(size.value)
-            if not GetUserNameEx(NameDisplay, buffer, ctypes.byref(size)):
-                return getpass.getuser()
-            return buffer.value or getpass.getuser()
-        except Exception:
-            return getpass.getuser()
-
-    elif system == "Darwin":
-        try:
-            result = subprocess.run(["id", "-F"], capture_output=True, text=True)
-            display_name = result.stdout.strip()
-            return display_name or getpass.getuser()
-        except Exception:
-            return getpass.getuser()
-
-    return getpass.getuser()
-
-
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     env_paths = ctx.environment.get("paths", {})
@@ -2651,7 +2619,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     target_dir = ctx.target_path
     global USER_NAME
-    USER_NAME = get_display_name()
+    try:
+        USER_NAME = getpass.getuser()
+    except Exception:
+        USER_NAME = "FERP"
 
     with cache_path.open("r", encoding="utf-8") as handle:
         pubs = json.load(handle)
