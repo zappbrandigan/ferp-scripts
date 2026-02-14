@@ -118,6 +118,23 @@ SOUNDMOUSE_COLUMNS: List[Tuple[str, float, float]] = [
     ("duration", 516, 600),
 ]
 
+SOUNDMOUSE_HEADER_LABELS = [
+    "#",
+    "reel no",
+    "cue title",
+    "role",
+    "name",
+    "society",
+    "usage",
+    "duration",
+]
+
+SOUNDMOUSE_HEADER_OUTPUT = {
+    "#": "cue #",
+    "reel no": "reel #",
+    "cue title": "title",
+}
+
 SOUNDMOUSE_HEADER_RE = re.compile(
     r"#\s*Reel\s*No\s*Cue\s*Title\s*Role\s*Name\s*Society\s*Usage\s*Duration",
     re.IGNORECASE,
@@ -173,19 +190,58 @@ def sm_cluster_rows(words, y_tol: float = 3):
     return rows
 
 
-def sm_assign_column(x: float) -> Optional[str]:
-    for name, x0, x1 in SOUNDMOUSE_COLUMNS:
+def sm_assign_column(
+    x: float, columns: list[tuple[str, float, float]]
+) -> Optional[str]:
+    for name, x0, x1 in columns:
         if x0 <= x <= x1:
             return name
     return None
 
 
-def sm_find_table_start_y(rows) -> Optional[float]:
+def sm_find_header_row(rows) -> Optional[list[dict[str, Any]]]:
     for row in rows:
         text = " ".join(w["text"] for w in row)
         if SOUNDMOUSE_HEADER_RE.search(text):
-            return row[0]["top"]
+            return row
     return None
+
+
+def sm_columns_from_header_row(
+    header_row: list[dict[str, Any]],
+    page_width: float | None,
+) -> Optional[list[tuple[str, float, float]]]:
+    def _norm(word: str) -> str:
+        return re.sub(r"[^\w#]+", "", word).lower()
+
+    words = [_norm(w["text"]) for w in header_row]
+    starts: list[float] = []
+    for label in SOUNDMOUSE_HEADER_LABELS:
+        parts = [_norm(part) for part in label.split()]
+        found = False
+        for idx in range(len(words) - len(parts) + 1):
+            if words[idx : idx + len(parts)] == parts:
+                starts.append(float(header_row[idx]["x0"]))
+                found = True
+                break
+        if not found:
+            return None
+
+    if not starts:
+        return None
+
+    right_edge = (
+        float(page_width)
+        if page_width is not None
+        else max(float(w["x1"]) for w in header_row) + 1.0
+    )
+
+    columns: list[tuple[str, float, float]] = []
+    for idx, label in enumerate(SOUNDMOUSE_HEADER_LABELS):
+        x0 = starts[idx]
+        x1 = (starts[idx + 1] - 1) if idx + 1 < len(starts) else right_edge
+        columns.append((SOUNDMOUSE_HEADER_OUTPUT.get(label, label), x0, x1))
+    return columns
 
 
 def parse_soundmouse(
@@ -251,12 +307,15 @@ def parse_soundmouse(
             words_total += len(words)
 
             rows = sm_cluster_rows(words)
-
-            table_start_y = sm_find_table_start_y(rows)
-            if table_start_y is None:
+            header_row = sm_find_header_row(rows)
+            if header_row is None:
                 continue
+            columns = sm_columns_from_header_row(header_row, page.width)
+            if columns is None:
+                columns = SOUNDMOUSE_COLUMNS
 
             pages_with_tables += 1
+            table_start_y = header_row[0]["top"]
             table_words = [w for w in words if w["top"] > table_start_y]
             table_rows = sm_cluster_rows(table_words)
 
@@ -264,9 +323,9 @@ def parse_soundmouse(
                 if check_cancel is not None:
                     check_cancel()
                 rows_total += 1
-                record = {name: [] for name, *_ in SOUNDMOUSE_COLUMNS}
+                record = {name: [] for name, *_ in columns}
                 for w in row:
-                    col = sm_assign_column(w["x0"])
+                    col = sm_assign_column(w["x0"], columns)
                     if col:
                         record[col].append(w["text"])
 
@@ -315,6 +374,8 @@ def parse_soundmouse(
 
                 # At this point we have a current cue; attach contributor if present
                 if current_cue and name:
+                    if name.strip().lower() == "total duration":
+                        continue
                     entry = {"name": name, "society": society}
                     r = role.strip().upper() if role else ""
 
@@ -359,6 +420,15 @@ WB_COLUMNS: List[Tuple[str, float, float]] = [
     ("publisher", 280, 480),
     ("how used", 485, 555),
     ("time", 558, 600),
+]
+
+WB_HEADER_LABELS = [
+    "no",
+    "selection",
+    "composer",
+    "publisher",
+    "how used",
+    "time",
 ]
 
 WB_HEADER_RE = re.compile(
@@ -414,19 +484,58 @@ def wb_cluster_rows(words, y_tol: float = 3):
     return rows
 
 
-def wb_assign_column(x: float) -> Optional[str]:
-    for name, x0, x1 in WB_COLUMNS:
+def wb_assign_column(
+    x: float, columns: list[tuple[str, float, float]]
+) -> Optional[str]:
+    for name, x0, x1 in columns:
         if x0 <= x <= x1:
             return name
     return None
 
 
-def wb_find_table_start_y(rows) -> Optional[float]:
+def wb_find_header_row(rows) -> Optional[list[dict[str, Any]]]:
     for row in rows:
         text = " ".join(w["text"] for w in row)
         if WB_HEADER_RE.search(text):
-            return row[0]["top"]
+            return row
     return None
+
+
+def wb_columns_from_header_row(
+    header_row: list[dict[str, Any]],
+    page_width: float | None,
+) -> Optional[list[tuple[str, float, float]]]:
+    def _norm(word: str) -> str:
+        return re.sub(r"[^\w]+", "", word).lower()
+
+    words = [_norm(w["text"]) for w in header_row]
+    starts: list[float] = []
+    for label in WB_HEADER_LABELS:
+        parts = [_norm(part) for part in label.split()]
+        found = False
+        for idx in range(len(words) - len(parts) + 1):
+            if words[idx : idx + len(parts)] == parts:
+                starts.append(float(header_row[idx]["x0"]))
+                found = True
+                break
+        if not found:
+            return None
+
+    if not starts:
+        return None
+
+    right_edge = (
+        float(page_width)
+        if page_width is not None
+        else max(float(w["x1"]) for w in header_row) + 1.0
+    )
+
+    columns: list[tuple[str, float, float]] = []
+    for idx, label in enumerate(WB_HEADER_LABELS):
+        x0 = starts[idx]
+        x1 = (starts[idx + 1] - 1) if idx + 1 < len(starts) else right_edge
+        columns.append((label, x0, x1))
+    return columns
 
 
 def parse_wb(
@@ -490,12 +599,15 @@ def parse_wb(
             words_total += len(words)
 
             rows = wb_cluster_rows(words)
-
-            table_start_y = wb_find_table_start_y(rows)
-            if table_start_y is None:
+            header_row = wb_find_header_row(rows)
+            if header_row is None:
                 continue
+            columns = wb_columns_from_header_row(header_row, page.width)
+            if columns is None:
+                columns = WB_COLUMNS
 
             pages_with_tables += 1
+            table_start_y = header_row[0]["top"]
             table_words = [w for w in words if w["top"] > table_start_y]
             table_rows = wb_cluster_rows(table_words)
 
@@ -503,9 +615,9 @@ def parse_wb(
                 if check_cancel is not None:
                     check_cancel()
                 rows_total += 1
-                record = {name: [] for name, *_ in WB_COLUMNS}
+                record = {name: [] for name, *_ in columns}
                 for w in row:
-                    col = wb_assign_column(w["x0"])
+                    col = wb_assign_column(w["x0"], columns)
                     if col:
                         record[col].append(w["text"])
 
@@ -563,6 +675,316 @@ def parse_wb(
             f"words={words_total} | rows={rows_total} | cues={len(cues)}"
         )
         # log_fn(f"wb text: cues={cues}")
+    return cues
+
+
+# =================================================
+# cuetrak
+# =================================================
+CUETRAK_COLUMNS: List[Tuple[str, float, float]] = [
+    ("cue", 30, 50),
+    ("cue title", 65, 135),
+    ("composer", 135, 355),
+    ("publisher", 360, 555),
+    ("time code in", 558, 615),
+    ("time code out", 619, 675),
+    ("duration", 680, 710),
+    ("usage", 715, 750),
+]
+
+CUETRAK_HEADER_LABELS = [
+    "cue",
+    "cue title",
+    "composer",
+    "publisher",
+    "time code in",
+    "time code out",
+    "duration",
+    "use",
+]
+
+CUETRAK_HEADER_RE = re.compile(
+    r"cue\s*cue title\s*composer\s*publisher\s*time code in\s*time code out\s*duration\s*use",
+    re.IGNORECASE,
+)
+
+CUETRAK_AM_RE = re.compile(r"\bAM\s+[A-Z]{2,}\s*$", re.IGNORECASE)
+
+CUETRAK_JUNK_ROW_RE = re.compile(
+    r"""
+    c-composer
+  | ar-arranger
+  | a-author
+  | ca-composer/author
+  | sr-sub-arranger
+  | sa-sub-author
+  | tr-translator
+  | e-publisher
+  | am-administrator
+  | se-sub-publisher
+  | bv-background
+  | vi-visual
+  | vv-visual
+  | src-visual
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def is_cuetrak_pdf(text: str) -> bool:
+    if not text:
+        return False
+
+    score = 0
+
+    # Strong signal: exact column header sequence
+    if CUETRAK_HEADER_RE.search(text):
+        score += 3
+
+    # Supporting signals
+    if re.search(r"\bAM\s+[A-Z]{2,}\s*$", text, re.IGNORECASE):
+        score += 1
+    if re.search(r"\bC\s*-\s*COMPOSER\b", text, re.IGNORECASE) and re.search(
+        r"\bE\s*-\s*PUBLISHER\b", text, re.IGNORECASE
+    ):
+        score += 1
+
+    return score >= 3
+
+
+def is_cuetrak_junk_row(cell: str) -> bool:
+    """
+    Decide whether the row/cell text is a Cuetrak legend/footer/etc.
+    Pass in any relevant cells (e.g. publisher, composer, full row text).
+    """
+    return bool(CUETRAK_JUNK_ROW_RE.search(cell))
+
+
+def cuetrak_extract_words(page):
+    return page.extract_words(
+        use_text_flow=False,
+        keep_blank_chars=False,
+        x_tolerance=1,
+        y_tolerance=3,
+    )
+
+
+def cuetrak_cluster_rows(words, y_tol: float = 3):
+    rows = []
+    for w in sorted(words, key=lambda w: w["top"]):
+        for row in rows:
+            if abs(row[0]["top"] - w["top"]) <= y_tol:
+                row.append(w)
+                break
+        else:
+            rows.append([w])
+
+    for row in rows:
+        row.sort(key=lambda w: w["x0"])
+    return rows
+
+
+def cuetrak_assign_column(
+    x: float, columns: list[tuple[str, float, float]]
+) -> Optional[str]:
+    for name, x0, x1 in columns:
+        if x0 <= x <= x1:
+            return name
+    return None
+
+
+def cuetrak_find_header_row(rows) -> Optional[list[dict[str, Any]]]:
+    for row in rows:
+        text = " ".join(w["text"] for w in row)
+        if CUETRAK_HEADER_RE.search(text):
+            return row
+    return None
+
+
+def cuetrak_columns_from_header_row(
+    header_row: list[dict[str, Any]],
+    page_width: float | None,
+) -> Optional[list[tuple[str, float, float]]]:
+    def _norm(word: str) -> str:
+        return re.sub(r"[^\w]+", "", word).lower()
+
+    words = [_norm(w["text"]) for w in header_row]
+    starts: list[float] = []
+    for label in CUETRAK_HEADER_LABELS:
+        parts = [_norm(part) for part in label.split()]
+        found = False
+        for idx in range(len(words) - len(parts) + 1):
+            if words[idx : idx + len(parts)] == parts:
+                starts.append(float(header_row[idx]["x0"]))
+                found = True
+                break
+        if not found:
+            return None
+
+    if not starts:
+        return None
+
+    right_edge = (
+        float(page_width)
+        if page_width is not None
+        else max(float(w["x1"]) for w in header_row) + 1.0
+    )
+
+    columns: list[tuple[str, float, float]] = []
+    for idx, label in enumerate(CUETRAK_HEADER_LABELS):
+        x0 = starts[idx]
+        x1 = (starts[idx + 1] - 1) if idx + 1 < len(starts) else right_edge
+        columns.append((label, x0, x1))
+    return columns
+
+
+def parse_cuetrak(
+    pdf_path: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> list[Dict[str, Any]]:
+    """
+    Parse Cuetrak cue sheets into a list of cue dictionaries.
+
+    Grouping rule:
+      - A row with a non-empty "cue" starts a new cue dict.
+      - Rows without "cue" are continuations of the current cue (e.g., more roles/names).
+    Output schema:
+      {
+        "cue": str,
+        "title": str | None,
+        "composers": str | None,
+        "publishers": [{"name": ...}],
+        "usage": str | None,
+      }
+    """
+    cues: list[Dict[str, Any]] = []
+    current_cue: Optional[Dict[str, Any]] = None
+
+    def flush_current():
+        nonlocal current_cue
+        if current_cue:
+            # Optional: drop completely empty shells
+            has_identity = any(
+                current_cue.get(k) for k in ("title", "usage", "publisher")
+            )
+            has_people = bool(
+                current_cue.get("composers") or current_cue.get("publishers")
+            )
+            if has_identity or has_people:
+                cues.append(current_cue)
+        current_cue = None
+
+    def norm_join(v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+
+    pages_scanned = 0
+    pages_with_tables = 0
+    words_total = 0
+    rows_total = 0
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            if check_cancel is not None:
+                check_cancel()
+            pages_scanned += 1
+            words = cuetrak_extract_words(page)
+            if not words:
+                continue
+            words_total += len(words)
+
+            rows = cuetrak_cluster_rows(words)
+            header_row = cuetrak_find_header_row(rows)
+            if header_row is None:
+                continue
+            columns = cuetrak_columns_from_header_row(header_row, page.width)
+
+            if columns is None:
+                columns = CUETRAK_COLUMNS
+
+            pages_with_tables += 1
+            table_start_y = header_row[0]["top"]
+            table_words = [w for w in words if w["top"] > table_start_y]
+            table_rows = cuetrak_cluster_rows(table_words)
+
+            for row in table_rows:
+                if check_cancel is not None:
+                    check_cancel()
+                rows_total += 1
+                record = {name: [] for name, *_ in columns}
+                for w in row:
+                    col = cuetrak_assign_column(w["x0"], columns)
+                    if col:
+                        record[col].append(w["text"])
+
+                # compact: only keep non-empty joined fields
+                compact = {k: norm_join(" ".join(v)) for k, v in record.items() if v}
+                if not compact:
+                    continue
+
+                cue_no = compact.get("cue", "")
+                cue_title = compact.get("cue title", "")
+                composer = compact.get("composer", "")
+                publisher = compact.get("publisher", "")
+                usage = compact.get("use", "")
+                # New cue boundary: cue # present
+                if cue_no:
+                    if cue_no.strip().lower() in ["roles", "usages", "time"]:
+                        continue
+                    flush_current()
+                    title_parts = [cue_title, composer]
+                    title = " ".join(p for p in title_parts if p)
+                    current_cue = {
+                        "cue": cue_no,
+                        "title": title,
+                        "composers": "",
+                        "publishers": [{"name": publisher}] if publisher else [],
+                        "usage": usage,
+                    }
+                else:
+                    # Continuation line: if we don't have a current cue yet, ignore it
+                    if not current_cue:
+                        continue
+
+                # At this point we have a current cue; attach contributor if present
+                if current_cue and composer and not cue_no:
+                    if is_cuetrak_junk_row(composer):
+                        continue
+                    current_cue["composers"] = (
+                        current_cue["composers"] + " " + composer
+                    ).strip()
+
+                if current_cue and publisher and not cue_no:
+                    if CUETRAK_AM_RE.search(publisher.strip()) or is_cuetrak_junk_row(
+                        publisher
+                    ):
+                        continue
+                    if current_cue["publishers"]:
+                        current_cue["publishers"][0]["name"] += " " + publisher
+                    else:
+                        current_cue["publishers"] = [{"name": publisher}]
+
+                if current_cue and usage and not cue_no:
+                    current_cue["usage"] = current_cue["usage"] + " " + usage
+
+                if current_cue and cue_title and not cue_no:
+                    if is_cuetrak_junk_row(cue_title):
+                        continue
+                    current_cue["title"] = current_cue["title"] + (
+                        " " + cue_title if current_cue["title"] else cue_title
+                    )
+
+        flush_current()
+
+    if log_fn:
+        log_fn(
+            "cuetrak parser: "
+            f"pages={pages_scanned} | pages_with_table={pages_with_tables} | "
+            f"words={words_total} | rows={rows_total} | cues={len(cues)}"
+        )
+        # log_fn(f"cuetrak text: cues={cues}")
     return cues
 
 
@@ -969,7 +1391,7 @@ def parse_default(
 # =================================================
 def detect_format(
     pdf_path: Path,
-) -> Literal["soundmouse", "wb", "rapidcue", "unknown", "needs_ocr"]:
+) -> Literal["soundmouse", "cuetrak", "wb", "rapidcue", "unknown", "needs_ocr"]:
     """
     "needs_ocr" is used when the first page has no extractable text.
     """
@@ -980,6 +1402,8 @@ def detect_format(
             return "needs_ocr"
         if is_soundmouse_pdf(text):
             return "soundmouse"
+        if is_cuetrak_pdf(text):
+            return "cuetrak"
         if is_wb_pdf(text):
             return "wb"
         if is_rapidcue_pdf(text):
@@ -3001,6 +3425,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
                     check_cancel=api.check_cancel,
                 )
+            elif fmt == "cuetrak":
+                api.log("debug", f"{pdf_path.name}: detected Cuetrak format")
+                raw_cues = parse_cuetrak(
+                    pdf_path,
+                    log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
+                    check_cancel=api.check_cancel,
+                )
             elif fmt == "wb":
                 api.log("debug", f"{pdf_path.name}: detected WB format")
                 raw_cues = parse_wb(
@@ -3048,7 +3479,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         f"{pdf_path.name}: skipped_logo_cues={skipped_logos}",
                     )
                 # api.log("debug", f"filtered cues:{filtered_cues}")
-            if fmt == "wb":
+            if fmt in ["wb", "cuetrak"]:
                 result = find_controlled_publishers_present_phrase(
                     filtered_cues,
                     con_pubs,
