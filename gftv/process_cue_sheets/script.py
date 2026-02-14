@@ -562,7 +562,7 @@ def parse_wb(
             f"pages={pages_scanned} | pages_with_table={pages_with_tables} | "
             f"words={words_total} | rows={rows_total} | cues={len(cues)}"
         )
-        log_fn(f"wb text: cues={cues}")
+        # log_fn(f"wb text: cues={cues}")
     return cues
 
 
@@ -1872,7 +1872,7 @@ def draw_top_full_badge(
     # Table layout (below divider)
     col_gap: float = 20,  # space between the two columns
     min_right_col_width: float = 40,  # min width for territory column
-    single_row_max_right_col_width: float = 130,  # cap territory width when only one row
+    single_row_max_right_col_width: float = 135,  # cap territory width when only one row
     header_bottom_gap: float = 0,  # space between header row and first data row
 ):
     """

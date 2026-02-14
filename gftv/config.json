@@ -44,6 +44,9 @@
       "target": [
         "highlighted_directory",
         "highlighted_file"
+      ],
+      "file_extensions": [
+        ".pdf"
       ]
     },
     {
