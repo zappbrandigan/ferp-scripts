@@ -35,7 +35,7 @@
     {
       "id": "gftv.query_pdf",
       "name": "Query: PDF Files",
-      "version": "1.0.3",
+      "version": "1.1.0",
       "script": "scripts/gftv/query_pdf/script.py",
       "dependencies": [
         "pypdf>=6.6.0",
@@ -195,7 +195,7 @@
     {
       "id": "gftv.process_cue_sheets",
       "name": "Process: Stamp Cue Sheets",
-      "version": "1.6.1",
+      "version": "1.6.2",
       "script": "scripts/gftv/process_cue_sheets/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8",
