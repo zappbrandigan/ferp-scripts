@@ -28,7 +28,7 @@ formats, and tags matched publishers with XMP metadata and a stamped badge.
 
 ## Behavior
 
-- Detects Soundmouse, RapidCue, Cuetrak, WB or unknown formats and parses cue data.
+- Detects format and parses cue data.
 - If the first page has no extractable text, the PDF is moved to `_needs_ocr`.
 - Matches controlled publishers from the cached category list.
 - For non-default parsers, co-publishers are only matched when they appear in the
@@ -46,12 +46,12 @@ formats, and tags matched publishers with XMP metadata and a stamped badge.
 Different cue sheet formats yield different parsing granularity. This affects how
 publishers are matched and how co-publishers are detected.
 
-- Soundmouse, RapidCue, WB, Cuetrak: These parsers operate on per-cue rows, so
+- Soundmouse, RapidCue, WB, Cuetrak, Silvermouse, NBC Standard, and Fox Sports: These parsers operate on per-cue rows, so
   main/co-publisher matching happens within the same cue. Co-publishers are only
   considered if a main publisher is matched in that cue.
 - Default/unknown: This parser does not have a per-cue notion. It scans the full
   document text to find publisher names and cannot apply per-cue co-publisher
-  logic.
+  logic. Users should choose `Select publishers` for co-publisher situations in this case.
 
 ## Notes
 
@@ -61,4 +61,3 @@ publishers are matched and how co-publishers are detected.
 
 ## TODO
 - Extend support for master/sync license detection to more cue sheet formats. (Currently only supported in Soundmouse formats.)
-- Add custom parsers for Soundmouse (landscape orientation) and Silvermouse

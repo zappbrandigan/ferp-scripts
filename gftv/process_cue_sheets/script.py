@@ -410,6 +410,306 @@ def parse_soundmouse(
 
 
 # =================================================
+# Soundmouse (Landscape)
+# =================================================
+
+SOUNDMOUSE_LANDSCAPE_COLUMNS: List[Tuple[str, float, float]] = [
+    ("cue #", 0, 39),
+    ("cue title", 37, 211),
+    ("origin", 208, 248),
+    ("usage", 246, 285),
+    ("role", 283, 383),
+    ("name", 381, 556),
+    ("society", 554, 655),
+    ("duration", 653, 707),
+    ("timecode", 705, 764),
+    ("reel no", 762, 840),
+]
+
+SOUNDMOUSE_LANDSCAPE_HEADER_LABELS = [
+    "#",
+    "cue title",
+    "origin",
+    "usage",
+    "role",
+    "name",
+    "society",
+    "duration",
+    "timecode",
+    "reel no",
+]
+
+SOUNDMOUSE_LANDSCAPE_HEADER_OUTPUT = {
+    "#": "cue #",
+    "reel no": "reel #",
+    "cue title": "title",
+}
+
+SOUNDMOUSE_LANDSCAPE_HEADER_RE = re.compile(
+    r"#\s*Cue\s*Title\s*Origin\s*Usage\s*Role\s*Name\s*Society\s*Duration\s*Timecode\s*Reel\s*No",
+    re.IGNORECASE,
+)
+
+
+def is_soundmouse_landscape_pdf(text: str) -> bool:
+    if not text:
+        return False
+    return bool(SOUNDMOUSE_LANDSCAPE_HEADER_RE.search(text))
+
+
+def sm_landscape_extract_words(page):
+    return page.extract_words(
+        use_text_flow=False,
+        keep_blank_chars=False,
+        x_tolerance=1,
+        y_tolerance=3,
+    )
+
+
+def sm_landscape_cluster_rows(words, y_tol: float = 3):
+    rows = []
+    for w in sorted(words, key=lambda w: w["top"]):
+        for row in rows:
+            if abs(row[0]["top"] - w["top"]) <= y_tol:
+                row.append(w)
+                break
+        else:
+            rows.append([w])
+
+    for row in rows:
+        row.sort(key=lambda w: w["x0"])
+    return rows
+
+
+def sm_landscape_assign_column(
+    x: float, columns: list[tuple[str, float, float]]
+) -> Optional[str]:
+    for name, x0, x1 in columns:
+        if x0 <= x <= x1:
+            return name
+    return None
+
+
+def sm_landscape_find_header_row(rows) -> Optional[list[dict[str, Any]]]:
+    for row in rows:
+        text = " ".join(w["text"] for w in row)
+        if SOUNDMOUSE_LANDSCAPE_HEADER_RE.search(text):
+            return row
+    return None
+
+
+def sm_landscape_columns_from_header_row(
+    header_row: list[dict[str, Any]],
+    page_width: float | None,
+) -> Optional[list[tuple[str, float, float]]]:
+    def _norm(word: str) -> str:
+        return re.sub(r"[^\w#]+", "", word).lower()
+
+    words = [_norm(w["text"]) for w in header_row]
+    starts: list[float] = []
+    for label in SOUNDMOUSE_LANDSCAPE_HEADER_LABELS:
+        parts = [_norm(part) for part in label.split()]
+        found = False
+        for idx in range(len(words) - len(parts) + 1):
+            if words[idx : idx + len(parts)] == parts:
+                starts.append(float(header_row[idx]["x0"]))
+                found = True
+                break
+        if not found:
+            return None
+
+    if not starts:
+        return None
+
+    right_edge = (
+        float(page_width)
+        if page_width is not None
+        else max(float(w["x1"]) for w in header_row) + 1.0
+    )
+
+    columns: list[tuple[str, float, float]] = []
+    for idx, label in enumerate(SOUNDMOUSE_LANDSCAPE_HEADER_LABELS):
+        x0 = starts[idx] - 3
+        x1 = (starts[idx + 1] - 1) if idx + 1 < len(starts) else right_edge
+        columns.append((SOUNDMOUSE_LANDSCAPE_HEADER_OUTPUT.get(label, label), x0, x1))
+    return columns
+
+
+def parse_soundmouse_landscape(
+    pdf_path: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> list[Dict[str, Any]]:
+    """
+    Parse Soundmouse (landscape orientation) cue sheets into a list of cue dictionaries.
+
+    Grouping rule:
+      - A row with a non-empty "#" starts a new cue dict.
+      - Rows without "#" are continuations of the current cue (e.g., more roles/names).
+
+    Output schema (similar spirit to RapidCue):
+      {
+        "cue": str,
+        "title": str | None,
+        "origin": str | None,
+        "reel": str | None,
+        "usage": str | None,
+        "duration": str | None,
+        "composers": [{"name": ..., "society": ...}],
+        "publishers": [{"name": ..., "society": ...}],
+        "notes": ["Note", "Note", ...],
+      }
+    """
+    cues: list[Dict[str, Any]] = []
+    current_cue: Optional[Dict[str, Any]] = None
+    last_seen_role: Optional[str] = None
+
+    def flush_current():
+        nonlocal current_cue
+        if current_cue:
+            # Optional: drop completely empty shells
+            has_identity = any(
+                current_cue.get(k) for k in ("cue", "title", "usage", "duration")
+            )
+            has_people = bool(
+                current_cue.get("composers") or current_cue.get("publishers")
+            )
+            if has_identity or has_people:
+                cues.append(current_cue)
+        current_cue = None
+
+    def norm_join(v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+
+    pages_scanned = 0
+    pages_with_tables = 0
+    words_total = 0
+    rows_total = 0
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            if check_cancel is not None:
+                check_cancel()
+            pages_scanned += 1
+            words = sm_landscape_extract_words(page)
+            if not words:
+                continue
+            words_total += len(words)
+
+            rows = sm_landscape_cluster_rows(words)
+            header_row = sm_landscape_find_header_row(rows)
+            if header_row is None:
+                continue
+            columns = sm_landscape_columns_from_header_row(header_row, page.width)
+            if columns is None:
+                columns = SOUNDMOUSE_LANDSCAPE_COLUMNS
+
+            pages_with_tables += 1
+            table_start_y = header_row[0]["top"]
+            table_words = [w for w in words if w["top"] > table_start_y]
+            table_rows = sm_landscape_cluster_rows(table_words)
+
+            for row in table_rows:
+                if check_cancel is not None:
+                    check_cancel()
+                rows_total += 1
+                record = {name: [] for name, *_ in columns}
+                for w in row:
+                    col = sm_landscape_assign_column(w["x0"], columns)
+                    if col:
+                        record[col].append(w["text"])
+
+                # compact: only keep non-empty joined fields
+                compact = {k: norm_join(" ".join(v)) for k, v in record.items() if v}
+                if not compact:
+                    continue
+
+                cue_no = compact.get("cue #")
+                title = compact.get("title")
+                origin = compact.get("origin")
+                reel_no = compact.get("reel #")
+                role = compact.get("role")
+                name = compact.get("name")
+                society = compact.get("society")
+                usage = compact.get("usage")
+                duration = compact.get("duration")
+                timecode = compact.get("timecode")
+                # New cue boundary: cue # present
+                if cue_no:
+                    flush_current()
+                    current_cue = {
+                        "cue": cue_no,
+                        "title": title,
+                        "origin": origin,
+                        "reel": reel_no,
+                        "usage": usage,
+                        "duration": duration,
+                        "composers": [],
+                        "publishers": [],
+                        "notes": [],
+                    }
+                    last_seen_role = None
+                else:
+                    # Continuation line: if we don't have a current cue yet, ignore it
+                    if not current_cue:
+                        continue
+                    # Some continuation lines may repeat title/usage/duration; fill if missing
+                    if not current_cue.get("title") and title:
+                        current_cue["title"] = title
+                    if not current_cue.get("usage") and usage:
+                        current_cue["usage"] = usage
+                    if not current_cue.get("duration") and duration:
+                        current_cue["duration"] = duration
+                    if title and timecode and (not duration or not usage):
+                        current_cue["title"] = current_cue["title"] + " " + title
+                    if title and (not duration or not usage):
+                        # skip page numbers
+                        if re.search(r"\d{1,3}\s*of\s*\d{1,3}", title):
+                            continue
+                        current_cue["notes"].append(title.strip())
+
+                # At this point we have a current cue; attach contributor if present
+                if current_cue and name:
+                    entry = {"name": name, "society": society}
+                    r = role.strip().upper() if role else ""
+
+                    if r in ["COMPOSER", "AUTHOR", "ARRANGER"]:
+                        last_seen_role = r
+                        current_cue["composers"].append(entry)
+                    elif r == "PUBLISHER":
+                        last_seen_role = r
+                        current_cue["publishers"].append(entry)
+                    elif r in ["ADMINISTRATOR", "RECORD LABEL", "PERFORMER"]:
+                        last_seen_role = r
+                    else:
+                        # Handle text line wrap with no role by using last seen role in this cue
+                        if re.match(r"\d{5,}$", name):
+                            # Ignore IPI codes
+                            continue
+                        elif last_seen_role in ["COMPOSER", "AUTHOR", "ARRANGER"]:
+                            current_cue["composers"][-1]["name"] += " " + name
+                        elif last_seen_role == "PUBLISHER":
+                            current_cue["publishers"][-1]["name"] += " " + name
+                elif current_cue and society:
+                    # Total duration appears near society column at the end of cues but before footer junk
+                    if society.strip().lower() == "total duration":
+                        break
+
+        flush_current()
+
+    if log_fn:
+        log_fn(
+            "soundmouse parser: "
+            f"pages={pages_scanned} | pages_with_table={pages_with_tables} | "
+            f"words={words_total} | rows={rows_total} | cues={len(cues)}"
+        )
+        # log_fn(f"soundmouse text: cues={cues}")
+    return cues
+
+
+# =================================================
 # WB
 # =================================================
 
@@ -553,8 +853,8 @@ def parse_wb(
 
     Output schema:
       {
-        "no": str,
-        "selection": str | None,
+        "cue_no": str,
+        "title": str | None,
         "composers": str | None,
         "publishers": [{"name": ...}],
         "duration": str | None,
@@ -567,7 +867,7 @@ def parse_wb(
     def flush_current():
         nonlocal current_cue
         if current_cue:
-            # Optional: drop completely empty shells
+            # drop completely empty shells
             has_identity = any(
                 current_cue.get(k) for k in ("selection", "usage", "duration")
             )
@@ -627,7 +927,7 @@ def parse_wb(
                     continue
 
                 cue_no = compact.get("no", "")
-                selection = compact.get("selection", "")
+                title = compact.get("selection", "")
                 composer = compact.get("composer", "")
                 publisher = compact.get("publisher", "")
                 usage = compact.get("how used", "")
@@ -636,8 +936,8 @@ def parse_wb(
                 if cue_no:
                     flush_current()
                     current_cue = {
-                        "no": cue_no,
-                        "selection": selection,
+                        "cue_no": cue_no,
+                        "title": title,
                         "composers": composer,
                         "publishers": [{"name": publisher}] if publisher else [],
                         "usage": usage,
@@ -661,10 +961,8 @@ def parse_wb(
                 if current_cue and usage and not cue_no:
                     current_cue["usage"] = current_cue["usage"] + " " + usage
 
-                if current_cue and selection and not cue_no:
-                    current_cue["selection"] = (
-                        current_cue["selection"] + " " + selection
-                    )
+                if current_cue and title and not cue_no:
+                    current_cue["title"] = current_cue["title"] + " " + title
 
         flush_current()
 
@@ -1244,6 +1542,343 @@ def parse_rapidcue(
 
 
 # =================================================
+# NBC Standard
+# =================================================
+NBC_HEADER_RE = re.compile(
+    r"occ\s*song\s*title\s*composers\s*publishers\s*usage\s*dur",
+    re.IGNORECASE,
+)
+
+
+def is_nbc_pdf(text: str) -> bool:
+    if not text:
+        return False
+    return bool(NBC_HEADER_RE.search(text))
+
+
+def parse_nbc_standard(
+    pdf_path: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> list[Dict[str, Any]]:
+    """
+    Parse NBC standard cue sheets into a list of cue dictionaries.
+
+    Output schema:
+      {
+        "cue_no": str,
+        "title": str | None,
+        "composers": str | None,
+        "publishers": [{"name": ...}],
+        "duration": str | None,
+        "usage": str | None,
+      }
+    """
+    cues: list[Dict[str, Any]] = []
+    pages_scanned = 0
+    pages_with_tables = 0
+    rows_total = 0
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            if check_cancel is not None:
+                check_cancel()
+            pages_scanned += 1
+            pages_with_tables += 1
+            table = page.extract_table() or []
+
+            for row in table:
+                if check_cancel is not None:
+                    check_cancel()
+                rows_total += 1
+                row = (row + [""] * 6)[:6]
+                # Skip headers and footer junk
+                if re.search(
+                    r"data and information is confidential", row[0] or "", re.IGNORECASE
+                ) or (
+                    re.search(r"occ", row[0] or "", re.IGNORECASE)
+                    and not re.search(r"song title", row[1] or "", re.IGNORECASE)
+                ):
+                    continue
+                cues.append(
+                    {
+                        "cue_no": row[0].strip().replace("\n", " ") if row[0] else "",
+                        "title": row[1].strip().replace("\n", " ") if row[1] else "",
+                        "composers": row[2].strip().replace("\n", " ")
+                        if row[2]
+                        else "",
+                        "publishers": [
+                            {
+                                "name": row[3].strip().replace("\n", " ")
+                                if row[3]
+                                else ""
+                            }
+                        ],
+                        "usage": row[4].strip().replace("\n", " ") if row[4] else "",
+                        "duration": row[5].strip().replace("\n", " ") if row[5] else "",
+                    }
+                )
+
+    if log_fn:
+        log_fn(
+            "nbc standard parser: "
+            f"pages={pages_scanned} | pages_with_table={pages_with_tables} | "
+            f"rows={rows_total} | cues={len(cues)}"
+        )
+        # log_fn(f"nbc standard text: cues={cues}")
+    return cues
+
+
+# =================================================
+# Silvermouse
+# =================================================
+SILVERMOUSE_HEADER_RE = re.compile(
+    r"""
+    no\s*timecode\s*music\s*title\s*publisher\s*performer\s*use\s*duration
+    |title\s*composer\s*publisher\s*arranger\s*performer\s*no\/\s*use\s*duration\s*occurrences
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def is_silvermouse_pdf(text: str) -> bool:
+    if not text:
+        return False
+    return bool(SILVERMOUSE_HEADER_RE.search(text))
+
+
+def parse_silvermouse(
+    pdf_path: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> list[Dict[str, Any]]:
+    """
+    Parse Silvermouse cue sheets into a list of cue dictionaries.
+
+    Output schema:
+      {
+        "cue_no": str,
+        "title": str | None,
+        "composers": str | None,
+        "publishers": [{"name": ...}],
+        "duration": str | None,
+        "usage": str | None,
+      }
+    """
+    cues: list[Dict[str, Any]] = []
+    pages_scanned = 0
+    pages_with_tables = 0
+    rows_total = 0
+    with pdfplumber.open(pdf_path) as pdf:
+        header = None
+        for page in pdf.pages:
+            if check_cancel is not None:
+                check_cancel()
+            pages_scanned += 1
+            pages_with_tables += 1
+            table = page.extract_table() or []
+            if not table or not table[0]:
+                continue
+            if not header and re.search(r"title", table[0][0] or "", re.IGNORECASE):
+                header = "layout_1"
+            elif not header and re.search(
+                r"timecode", table[0][1] or "", re.IGNORECASE
+            ):
+                header = "layout_2"
+
+            if header == "layout_1":
+                for row in table:
+                    if check_cancel is not None:
+                        check_cancel()
+                    rows_total += 1
+                    row = (row + [""] * 11)[:11]
+                    # Skip headers and footer junk
+                    if not row[2] or (
+                        re.search(r"music title", row[2] or "", re.IGNORECASE)
+                    ):
+                        continue
+                    cues.append(
+                        {
+                            "cue_no": row[10].strip().replace("\n", " ")
+                            if row[10]
+                            else "",
+                            "title": row[0].strip().replace("\n", " ")
+                            if row[0]
+                            else "",
+                            "composers": row[1].strip().replace("\n", " ")
+                            if row[1]
+                            else "",
+                            "publishers": [
+                                {
+                                    "name": row[2].strip().replace("\n", " ")
+                                    if row[2]
+                                    else ""
+                                }
+                            ],
+                            "usage": row[8].strip().replace("\n", " ")
+                            if row[8]
+                            else "",
+                            "duration": row[9].strip().replace("\n", " ")
+                            if row[9]
+                            else "",
+                        }
+                    )
+            elif header == "layout_2":
+                for row in table:
+                    if check_cancel is not None:
+                        check_cancel()
+                    rows_total += 1
+                    row = (row + [""] * 11)[:11]
+                    # Skip headers and footer junk
+                    if not row[2] or (
+                        re.search(r"music title", row[2] or "", re.IGNORECASE)
+                    ):
+                        continue
+                    cues.append(
+                        {
+                            "cue_no": row[0].strip().replace("\n", " ")
+                            if row[0]
+                            else "",
+                            "title": row[2].strip().replace("\n", " ")
+                            if row[2]
+                            else "",
+                            "composers": row[3].strip().replace("\n", " ")
+                            if row[3]
+                            else "",
+                            "publishers": [
+                                {
+                                    "name": row[4].strip().replace("\n", " ")
+                                    if row[4]
+                                    else ""
+                                }
+                            ],
+                            "usage": row[9].strip().replace("\n", " ")
+                            if row[9]
+                            else "",
+                            "duration": row[10].strip().replace("\n", " ")
+                            if row[10]
+                            else "",
+                        }
+                    )
+
+    if log_fn:
+        log_fn(
+            "silvermouse parser: "
+            f"pages={pages_scanned} | pages_with_table={pages_with_tables} | "
+            f"rows={rows_total} | cues={len(cues)}"
+        )
+        # log_fn(f"silvermouse text: cues={cues}")
+    return cues
+
+
+# =================================================
+# Fox Sports
+# =================================================
+
+FOX_SPORTS_HEADER_RE = re.compile(
+    r"seq\.\s*#\s*cue\s*title\s*usage\s*type\s*running\s*composer\(s\)\s*publisher\(s\)\s*revised",
+    re.IGNORECASE,
+)
+
+
+def is_fox_sports_pdf(text: str) -> bool:
+    if not text:
+        return False
+    return bool(FOX_SPORTS_HEADER_RE.search(text))
+
+
+def parse_fox_sports(
+    pdf_path: Path,
+    log_fn: Optional[Callable[[str], None]] = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> list[Dict[str, Any]]:
+    """
+    Parse Fox cue sheets into a list of cue dictionaries.
+
+    Output schema:
+      {
+        "cue_no": str,
+        "title": str | None,
+        "composers": str | None,
+        "publishers": [{"name": ...}],
+        "usage": str | None,
+      }
+    """
+    cues: list[Dict[str, Any]] = []
+    pages_scanned = 0
+    pages_with_tables = 0
+    rows_total = 0
+    with pdfplumber.open(pdf_path) as pdf:
+        first_page = pdf.pages[0]
+        first_table = first_page.extract_table() or []
+        header_map = {
+            "cue_no": 0,
+            "title": 1,
+            "usage": 2,
+            "composers": 6,
+            "publishers": 7,
+        }
+
+        def clean(value):
+            if not value:
+                return ""
+            return str(value).strip().replace("\n", " ")
+
+        for row in first_table[1:]:
+            row = (row + [""] * 9)[:9]
+            if not row[header_map["title"]]:
+                continue
+            rows_total += 1
+            cues.append(
+                {
+                    "cue_no": clean(row[header_map["cue_no"]]),
+                    "title": clean(row[header_map["title"]]),
+                    "usage": clean(row[header_map["usage"]]),
+                    "composers": clean(row[header_map["composers"]]),
+                    "publishers": [{"name": clean(row[header_map["publishers"]])}],
+                }
+            )
+
+        if len(pdf.pages) > 1:
+            # column shifts after first page for some reason
+            header_map["composers"] -= 2
+            header_map["publishers"] -= 2
+
+            for page in pdf.pages[1:]:
+                if check_cancel is not None:
+                    check_cancel()
+                pages_scanned += 1
+                pages_with_tables += 1
+                table = page.extract_table() or []
+                if not table:
+                    continue
+                for row in table:
+                    if check_cancel is not None:
+                        check_cancel()
+                    rows_total += 1
+                    row = (row + [""] * 7)[:7]
+                    cues.append(
+                        {
+                            "cue_no": clean(row[header_map["cue_no"]]),
+                            "title": clean(row[header_map["title"]]),
+                            "usage": clean(row[header_map["usage"]]),
+                            "composers": clean(row[header_map["composers"]]),
+                            "publishers": [
+                                {"name": clean(row[header_map["publishers"]])}
+                            ],
+                        }
+                    )
+
+    if log_fn:
+        log_fn(
+            "fox sports parser: "
+            f"pages={pages_scanned} | pages_with_table={pages_with_tables} | "
+            f"rows={rows_total} | cues={len(cues)}"
+        )
+        # log_fn(f"fox sports text: cues={cues}")
+    return cues
+
+
+# =================================================
 # Default parser (unknown format)
 # =================================================
 def default_extract_lines(
@@ -1391,12 +2026,24 @@ def parse_default(
 # =================================================
 def detect_format(
     pdf_path: Path,
-) -> Literal["soundmouse", "cuetrak", "wb", "rapidcue", "unknown", "needs_ocr"]:
+) -> Literal[
+    "soundmouse",
+    "soundmouse_landscape",
+    "cuetrak",
+    "wb",
+    "rapidcue",
+    "nbc_standard",
+    "silvermouse",
+    "fox_sports",
+    "unknown",
+    "needs_ocr",
+]:
     """
     "needs_ocr" is used when the first page has no extractable text.
     """
     with pdfplumber.open(pdf_path) as pdf:
         first_page = pdf.pages[0]
+        second_page = pdf.pages[1] if len(pdf.pages) > 1 else None
         text = first_page.extract_text() or ""
         if not text.strip():
             return "needs_ocr"
@@ -1408,6 +2055,20 @@ def detect_format(
             return "wb"
         if is_rapidcue_pdf(text):
             return "rapidcue"
+        if is_nbc_pdf(text):
+            return "nbc_standard"
+        if is_fox_sports_pdf(text):
+            return "fox_sports"
+        # Soundmouse landscape has a title page with no column headers
+        if second_page and is_soundmouse_landscape_pdf(
+            text + (second_page.extract_text() or "")
+        ):
+            return "soundmouse_landscape"
+        # Silvermouse varies and can have a title page
+        if second_page and is_silvermouse_pdf(
+            text + (second_page.extract_text() or "")
+        ):
+            return "silvermouse"
     return "unknown"
 
 
@@ -1417,7 +2078,7 @@ def filter_logos(cues: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
         title = cue.get("title", "") or cue.get("selection", "") or ""
         usage = cue.get("usage") or ""
         notes = cue.get("notes") or []
-        if usage == "EE" or LOGO_RE.search(usage) or LOGO_RE.search(title):
+        if usage in ["EE", "LG"] or LOGO_RE.search(usage) or LOGO_RE.search(title):
             continue
         if any(LOGO_RE.search(note or "") for note in notes):
             continue
@@ -3470,6 +4131,15 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
                     check_cancel=api.check_cancel,
                 )
+            elif fmt == "soundmouse_landscape":
+                api.log(
+                    "debug", f"{pdf_path.name}: detected Soundmouse Landscape format"
+                )
+                raw_cues = parse_soundmouse_landscape(
+                    pdf_path,
+                    log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
+                    check_cancel=api.check_cancel,
+                )
             elif fmt == "cuetrak":
                 api.log("debug", f"{pdf_path.name}: detected Cuetrak format")
                 raw_cues = parse_cuetrak(
@@ -3487,6 +4157,27 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             elif fmt == "rapidcue":
                 api.log("debug", f"{pdf_path.name}: detected RapidCue format")
                 raw_cues = parse_rapidcue(
+                    pdf_path,
+                    log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
+                    check_cancel=api.check_cancel,
+                )
+            elif fmt == "nbc_standard":
+                api.log("debug", f"{pdf_path.name}: detected NBC Standard format")
+                raw_cues = parse_nbc_standard(
+                    pdf_path,
+                    log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
+                    check_cancel=api.check_cancel,
+                )
+            elif fmt == "silvermouse":
+                api.log("debug", f"{pdf_path.name}: detected Silvermouse format")
+                raw_cues = parse_silvermouse(
+                    pdf_path,
+                    log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
+                    check_cancel=api.check_cancel,
+                )
+            elif fmt == "fox_sports":
+                api.log("debug", f"{pdf_path.name}: detected Fox Sports format")
+                raw_cues = parse_fox_sports(
                     pdf_path,
                     log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
                     check_cancel=api.check_cancel,
@@ -3524,7 +4215,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         f"{pdf_path.name}: skipped_logo_cues={skipped_logos}",
                     )
                 # api.log("debug", f"filtered cues:{filtered_cues}")
-            use_phrase_match = fmt in ["wb", "cue_spark"]
+            use_phrase_match = fmt in [
+                "wb",
+                "cuetrak",
+                "nbc_standard",
+                "silvermouse",
+                "fox_sports",
+            ]
             if use_phrase_match:
                 result = find_controlled_publishers_present_phrase(
                     filtered_cues,

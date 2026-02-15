@@ -92,6 +92,7 @@ def _convert_html_to_pdf(
             "--no-first-run",
             "--no-default-browser-check",
             f"--print-to-pdf={temp_destination}",
+            "--no-pdf-header-footer",
             temp_html.as_uri(),
         ]
         result = subprocess.run(
