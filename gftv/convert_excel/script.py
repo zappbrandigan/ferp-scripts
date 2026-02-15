@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
 from typing import NotRequired, TypedDict
 
 from ferp.fscp.scripts import sdk
@@ -23,33 +25,52 @@ def _start_excel():
     return xl_obj
 
 
-def _get_print_area(worksheet):
-    """Find last row/column with values to determine print area."""
-    # Hardcoded Excel constants to avoid pywin32 gencache issues.
-    # xlValues = -4163, xlByRows = 1, xlByColumns = 2, xlPrevious = 2
+def _get_print_area(worksheet, include_formulas=False):
+    """
+    Determine print area as A1:<last_col><last_row>, using Excel's Find("*") approach.
+    Works for .xls/.xlsx via COM.
+
+    include_formulas:
+        False -> LookIn=xlValues (what user sees)
+        True  -> LookIn=xlFormulas (treat formula cells as used even if result is "")
+    """
+    # Excel constants (hardcoded)
     xl_values = -4163
+    xl_formulas = -4123
     xl_by_rows = 1
     xl_by_columns = 2
     xl_previous = 2
+    xl_part = 2  # LookAt:=xlPart
 
-    last_cell = worksheet.Cells(1, 1)
-    last_row_cell = worksheet.Cells.Find(
+    look_in = xl_formulas if include_formulas else xl_values
+
+    # Optional: ensure values are current (if app is Manual calculation)
+    # worksheet.Calculate()
+
+    after = worksheet.Cells(1, 1)
+
+    common_kwargs = dict(
         What="*",
-        After=last_cell,
-        LookIn=xl_values,
+        After=after,
+        LookIn=look_in,
+        LookAt=xl_part,
+        MatchCase=False,
+        SearchFormat=False,
+    )
+
+    last_row_cell = worksheet.Cells.Find(
         SearchOrder=xl_by_rows,
         SearchDirection=xl_previous,
+        **common_kwargs,
     )
     last_col_cell = worksheet.Cells.Find(
-        What="*",
-        After=last_cell,
-        LookIn=xl_values,
         SearchOrder=xl_by_columns,
         SearchDirection=xl_previous,
+        **common_kwargs,
     )
 
     if last_row_cell is None or last_col_cell is None:
-        return "A1"
+        return "A1:A1"
 
     last_row = int(last_row_cell.Row)
     last_col = int(last_col_cell.Column)
@@ -188,7 +209,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     api.log("info", f"Convert Excel to PDF | Files found={total_files}")
 
-    xl_window = _start_excel()
+    try:
+        xl_window = _start_excel()
+    except Exception:
+        gen_py = Path(Path.home(), "AppData", "Local", "Temp", "gen_py")
+        shutil.rmtree(gen_py, ignore_errors=True)
+        xl_window = _start_excel()
     converted: list[str] = []
     failures: list[str] = []
 
