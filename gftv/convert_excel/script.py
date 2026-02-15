@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import NotRequired, TypedDict
 
 from ferp.fscp.scripts import sdk
@@ -10,6 +9,7 @@ from ferp.fscp.scripts.common import build_destination, collect_files
 class UserResponse(TypedDict):
     value: str
     autofitcolumn: bool
+    portrait: bool
     recursive: NotRequired[bool]
 
 
@@ -24,38 +24,45 @@ def _start_excel():
 
 
 def _get_print_area(worksheet):
-    """Find last column and last row containing data to determine print area."""
+    """Find last row/column with values to determine print area."""
     from win32com import client  # type: ignore
 
-    column_letters = [chr(x) for x in range(65, 91)]
-    col_last_row = {}
+    xl_values = client.constants.xlValues
+    xl_by_rows = client.constants.xlByRows
+    xl_by_columns = client.constants.xlByColumns
+    xl_previous = client.constants.xlPrevious
 
-    for letter in column_letters:
-        try:
-            col_last_row[letter] = (
-                worksheet.Cells(worksheet.Rows.Count, letter)
-                .End(client.constants.xlShiftUp)
-                .Row
-            )
-        except Exception:
-            col_last_row[letter] = 1
+    last_cell = worksheet.Cells(1, 1)
+    last_row_cell = worksheet.Cells.Find(
+        What="*",
+        After=last_cell,
+        LookIn=xl_values,
+        SearchOrder=xl_by_rows,
+        SearchDirection=xl_previous,
+    )
+    last_col_cell = worksheet.Cells.Find(
+        What="*",
+        After=last_cell,
+        LookIn=xl_values,
+        SearchOrder=xl_by_columns,
+        SearchDirection=xl_previous,
+    )
 
-    columns_with_data = [k for k, v in col_last_row.items() if v > 1]
-    if not columns_with_data:
+    if last_row_cell is None or last_col_cell is None:
         return "A1"
 
-    last_row = max(col_last_row.values())
-    last_column = max(columns_with_data)
+    last_row = int(last_row_cell.Row)
+    last_col = int(last_col_cell.Column)
+    last_col_letter = worksheet.Cells(1, last_col).Address(False, False).split("1")[0]
+    return f"A1:{last_col_letter}{last_row}"
 
-    return f"A1:{last_column}{last_row}"
 
-
-def _page_setup(worksheet, print_area, autocolumn):
+def _page_setup(worksheet, print_area, autocolumn, portrait):
     """Set default print to pdf page setup options."""
     if autocolumn:
         worksheet.Columns.AutoFit()
     worksheet.PageSetup.Zoom = False
-    worksheet.PageSetup.Orientation = 2  # landscape:2, portrait:1
+    worksheet.PageSetup.Orientation = 1 if portrait else 2  # portrait:1, landscape:2
     worksheet.PageSetup.FitToPagesTall = False
     worksheet.PageSetup.FitToPagesWide = 1
     worksheet.PageSetup.PrintTitleColumns = False
@@ -63,8 +70,15 @@ def _page_setup(worksheet, print_area, autocolumn):
     worksheet.PageSetup.PrintArea = print_area
 
 
-def _export_pdf(workbook, out_file: Path) -> None:
-    workbook.ExportAsFixedFormat(0, str(out_file))
+def _select_worksheet(workbook, sheet_value: str | None):
+    if not sheet_value:
+        return workbook.ActiveSheet
+    sheet_value = sheet_value.strip()
+    if not sheet_value:
+        return workbook.ActiveSheet
+    if sheet_value.isdigit():
+        return workbook.Worksheets(int(sheet_value))
+    return workbook.Worksheets(sheet_value)
 
 
 @sdk.script
@@ -90,8 +104,9 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         "default": False,
     }
     payload = api.request_input_json(
-        "Options for Excel to PDF Conversion",
+        "Options for Excel to PDF Conversion (text: sheet name or index, optional)",
         id="convert_excel_options",
+        default="",
         fields=[
             *([recursive_field] if ctx.target_kind == "directory" else []),
             {
@@ -100,13 +115,22 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "label": "Autofit columns",
                 "default": True,
             },
+            {
+                "id": "portrait",
+                "type": "bool",
+                "label": "Portrait orientation",
+                "default": False,
+            },
         ],
-        show_text_input=False,
+        show_text_input=True,
+        text_input_style="single_line",
         payload_type=UserResponse,
     )
 
     recursive = payload.get("recursive", False)
     autofit_colulmn = payload["autofitcolumn"]
+    portrait = payload["portrait"]
+    sheet_value = payload.get("value", "").strip()
 
     target = ctx.target_path
     xl_files = collect_files(
@@ -163,8 +187,16 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             workbook = None
             try:
                 workbook = xl_window.Workbooks.Open(str(file_path))
+                try:
+                    worksheet = _select_worksheet(workbook, sheet_value)
+                except Exception:
+                    raise RuntimeError(
+                        f"Worksheet not found for '{sheet_value or 'active sheet'}'."
+                    )
+                print_area = _get_print_area(worksheet)
+                _page_setup(worksheet, print_area, autofit_colulmn, portrait)
                 out_path = build_destination(file_path.parent, file_path.stem, ".pdf")
-                _export_pdf(workbook, out_path)
+                worksheet.ExportAsFixedFormat(0, str(out_path))
                 converted.append(str(out_path))
                 api.progress(current=index, total=total_files, unit="files")
             except Exception as exc:
