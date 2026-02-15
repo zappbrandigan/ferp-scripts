@@ -130,7 +130,7 @@
     {
       "id": "gftv.convert_html_to_pdf",
       "name": "Convert: HTML to PDF",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "script": "scripts/gftv/convert_html_to_pdf/script.py",
       "target": [
         "highlighted_directory",
@@ -195,7 +195,7 @@
     {
       "id": "gftv.process_cue_sheets",
       "name": "Process: Stamp Cue Sheets",
-      "version": "1.7.0",
+      "version": "1.7.1",
       "script": "scripts/gftv/process_cue_sheets/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8",
