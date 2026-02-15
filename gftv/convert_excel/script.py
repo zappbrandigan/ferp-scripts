@@ -25,12 +25,12 @@ def _start_excel():
 
 def _get_print_area(worksheet):
     """Find last row/column with values to determine print area."""
-    from win32com import client  # type: ignore
-
-    xl_values = client.constants.xlValues
-    xl_by_rows = client.constants.xlByRows
-    xl_by_columns = client.constants.xlByColumns
-    xl_previous = client.constants.xlPrevious
+    # Hardcoded Excel constants to avoid pywin32 gencache issues.
+    # xlValues = -4163, xlByRows = 1, xlByColumns = 2, xlPrevious = 2
+    xl_values = -4163
+    xl_by_rows = 1
+    xl_by_columns = 2
+    xl_previous = 2
 
     last_cell = worksheet.Cells(1, 1)
     last_row_cell = worksheet.Cells.Find(
@@ -53,7 +53,7 @@ def _get_print_area(worksheet):
 
     last_row = int(last_row_cell.Row)
     last_col = int(last_col_cell.Column)
-    last_col_letter = worksheet.Cells(1, last_col).Address(False, False).split("1")[0]
+    last_col_letter = _column_letter(last_col)
     return f"A1:{last_col_letter}{last_row}"
 
 
@@ -68,6 +68,17 @@ def _page_setup(worksheet, print_area, autocolumn, portrait):
     worksheet.PageSetup.PrintTitleColumns = False
     worksheet.PageSetup.PrintTitleRows = False
     worksheet.PageSetup.PrintArea = print_area
+
+
+def _column_letter(index: int) -> str:
+    """Convert 1-based column index to Excel column letters."""
+    if index < 1:
+        return "A"
+    letters: list[str] = []
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters.append(chr(65 + remainder))
+    return "".join(reversed(letters))
 
 
 def _select_worksheet(workbook, sheet_value: str | None):
