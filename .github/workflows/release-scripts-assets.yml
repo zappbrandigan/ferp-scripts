@@ -28,9 +28,17 @@ jobs:
 
           namespaces: list[dict[str, str]] = []
 
+          core_config_path = scripts_root / "core" / "config.json"
+          core_version = ""
+          if core_config_path.exists():
+              core_config = json.loads(core_config_path.read_text(encoding="utf-8"))
+              core_version = str(core_config.get("version") or "").strip()
+
           for config_path in sorted(scripts_root.glob("*/config.json")):
               namespace = config_path.parent.name
               zip_path = dist / f"{namespace}.zip"
+              config_payload = json.loads(config_path.read_text(encoding="utf-8"))
+              namespace_version = str(config_payload.get("version") or "").strip()
 
               with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
                   for path in (scripts_root / namespace).rglob("*"):
@@ -44,10 +52,15 @@ jobs:
                       "id": namespace,
                       "asset": zip_path.name,
                       "config": f"{namespace}/config.json",
+                      "version": namespace_version,
                   }
               )
 
-          index_payload = {"bundle_api_version": 1, "namespaces": namespaces}
+          index_payload = {
+              "bundle_api_version": 1,
+              "core_version": core_version,
+              "namespaces": namespaces,
+          }
           (dist / "namespaces.json").write_text(
               json.dumps(index_payload, indent=2) + "\n",
               encoding="utf-8",
