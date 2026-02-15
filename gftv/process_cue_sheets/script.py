@@ -1814,6 +1814,51 @@ def find_controlled_publishers_present_phrase(
     }
 
 
+def find_controlled_publishers_with_copub_dependency(
+    filtered_cues: list[Dict[str, Any]],
+    controlled_publishers: list[str],
+    *,
+    main_pub_set: set[str],
+    copub_pub_set: set[str],
+    aliases_by_publisher: Dict[str, List[str]] | None = None,
+    use_phrase_match: bool = False,
+    auto_match_threshold: float = 0.92,
+    review_threshold: float = 0.85,
+) -> list[str]:
+    matched_main: set[str] = set()
+    matched_copub: set[str] = set()
+
+    for cue in filtered_cues:
+        if use_phrase_match:
+            result = find_controlled_publishers_present_phrase(
+                [cue],
+                controlled_publishers,
+                aliases_by_publisher=aliases_by_publisher,
+            )
+        else:
+            result = find_controlled_publishers_present(
+                [cue],
+                controlled_publishers,
+                aliases_by_publisher=aliases_by_publisher,
+                auto_match_threshold=auto_match_threshold,
+                review_threshold=review_threshold,
+            )
+
+        cue_matches = set(result.get("found_controlled_publishers", []))
+        if not cue_matches:
+            continue
+
+        cue_main = cue_matches & main_pub_set
+        if not cue_main:
+            continue
+
+        matched_main |= cue_main
+        if copub_pub_set:
+            matched_copub |= cue_matches & copub_pub_set
+
+    return sorted(matched_main | matched_copub)
+
+
 def escape_xml(s: str) -> str:
     return (
         s.replace("&", "&amp;")
@@ -3479,7 +3524,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         f"{pdf_path.name}: skipped_logo_cues={skipped_logos}",
                     )
                 # api.log("debug", f"filtered cues:{filtered_cues}")
-            if fmt in ["wb", "cuetrak"]:
+            use_phrase_match = fmt in ["wb", "cue_spark"]
+            if use_phrase_match:
                 result = find_controlled_publishers_present_phrase(
                     filtered_cues,
                     con_pubs,
@@ -3493,8 +3539,17 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     auto_match_threshold=0.92,
                     review_threshold=0.85,
                 )
-            matched_publishers = result.get("found_controlled_publishers", [])
             accuracy_audits = result.get("evidence_by_controlled", {})
+            matched_publishers = find_controlled_publishers_with_copub_dependency(
+                filtered_cues,
+                con_pubs,
+                main_pub_set=main_pub_set,
+                copub_pub_set=copub_pub_set,
+                aliases_by_publisher=observed_name_variants,
+                use_phrase_match=use_phrase_match,
+                auto_match_threshold=0.92,
+                review_threshold=0.85,
+            )
         matched_main = [p for p in matched_publishers if p in main_pub_set]
         matched_copub = [p for p in matched_publishers if p in copub_pub_set]
         has_both_groups = bool(matched_main) and bool(matched_copub)
