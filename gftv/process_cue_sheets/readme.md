@@ -36,7 +36,7 @@ formats, and tags matched publishers with XMP metadata and a stamped badge.
   publisher is found in that cue.
 - If controlled publisher has "split" territories, a territory selection prompt will appear.
 - Adds XMP metadata for matched publishers and stamps the first page. (It will remove any existing stamps before adding a new stamp.)
-- By default, writes stamped PDFs to an `_stamped` folder next to the source file.
+- By default, writes stamped PDFs to a `_stamped` folder next to the source file.
 - Optional `Overwrite` updates the original files instead of writing to `_stamped`.
 - Moves unmatched PDFs into a `_nop` folder.
 - Moves mixed-territory PDFs into `_error`.
