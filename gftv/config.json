@@ -1,5 +1,5 @@
 {
-  "version": "1.0.4",
+  "version": "1.0.5",
   "scripts": [
     {
       "id": "gftv.extract_pdf_metadata",
@@ -79,7 +79,7 @@
     {
       "id": "gftv.group_cue_sheets",
       "name": "Organize: Group Cue Sheets",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "script": "scripts/gftv/group_cue_sheets/script.py",
       "dependencies": [
         "pypdf>=6.6.0"
