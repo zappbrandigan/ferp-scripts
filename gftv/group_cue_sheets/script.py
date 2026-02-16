@@ -81,6 +81,7 @@ def _truncate_name(value: str, max_len: int = MAX_FOLDER_LENGTH) -> str:
 def _sanitize_segment(value: str, *, space_replacement: str) -> str:
     cleaned = value.strip().lower()
     cleaned = cleaned.replace("_", " ")
+    cleaned = cleaned.replace(",", "")
     cleaned = _WHITESPACE_RE.sub(space_replacement, cleaned)
     cleaned = _INVALID_NAME_CHARS.sub("", cleaned)
     if space_replacement:
