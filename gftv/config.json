@@ -1,5 +1,5 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "scripts": [
     {
       "id": "gftv.extract_pdf_metadata",
@@ -168,7 +168,7 @@
     {
       "id": "gftv.rename_fox_sports",
       "name": "Rename: Fox Sports",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "script": "scripts/gftv/rename_fox_sports/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8"
@@ -208,7 +208,7 @@
     {
       "id": "gftv.process_cue_sheets",
       "name": "Process: Stamp Cue Sheets",
-      "version": "1.7.2",
+      "version": "1.7.3",
       "script": "scripts/gftv/process_cue_sheets/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8",
