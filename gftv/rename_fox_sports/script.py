@@ -88,17 +88,18 @@ def _derive_name(path: Path, text: str) -> str:
     )
     if not ep_match:
         raise ValueError("Episode title not found in cue sheet.")
+    episode_title = ep_match.group("ep_title").strip()
+    is_episode_unique = _is_episode_unique(production_title, episode_title)
     ep_num_match = re.search(
-        r"episode\s*number:\s*(?P<ep_number>[A-Za-z0-9][A-Za-z0-9_-]*)(?=\s|$)",
+        r"episode\s*number:\s*(?P<ep_number>[A-Za-z0-9][A-Za-z0-9_-]*)(?=\n)",
         text,
         re.IGNORECASE,
     )
-    if not ep_num_match:
-        raise ValueError("Episode number not found in cue sheet.")
-    episode_title = ep_match.group("ep_title").strip()
-    episode_number = ep_num_match.group("ep_number").strip()
-    is_episode_unique = _is_episode_unique(production_title, episode_title)
-    date_token = f"{air_date}-{episode_number}"
+    if ep_num_match:
+        episode_number = ep_num_match.group("ep_number").strip()
+        date_token = f"{air_date}-{episode_number}"
+    else:
+        date_token = air_date
 
     if is_episode_unique:
         stem = f"{_sanitize_parts(production_title)}   {_sanitize_parts(episode_title)}  Ep No. {date_token}"

@@ -1545,7 +1545,7 @@ def parse_rapidcue(
 # NBC Standard
 # =================================================
 NBC_HEADER_RE = re.compile(
-    r"occ\s*song\s*title\s*composers\s*publishers\s*usage\s*dur",
+    r"occ\s*song\s*title\s*composers?\s*publishers?\s*(performing)?\s*usage\s*dur",
     re.IGNORECASE,
 )
 

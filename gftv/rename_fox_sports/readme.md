@@ -34,7 +34,6 @@ title, episode title, air date, and episode number extracted from page 1.
 
 ## Notes
 
-- Episode numbers may be alphanumeric; the script reads the first token after
-  `Episode Number:` and ignores the following labels.
+- Episode numbers may be alphanumeric, but special characters are removed.
 - If files in `_check/` include `_02`, `_03`, etc., the file may be a duplicate or
   there was insufficient information to rename automatically.
