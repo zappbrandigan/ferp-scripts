@@ -1274,6 +1274,8 @@ RC_DESCRIPTOR_TERMS = {
     "SEGMENT",
     "BUMPER",
     "LOGO",
+    "SRC",
+    "*SRC*",
 }
 
 
@@ -1994,7 +1996,18 @@ def filter_logos(cues: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
         title = cue.get("title", "") or cue.get("selection", "") or ""
         usage = cue.get("usage") or ""
         notes = cue.get("notes") or []
-        if usage in ["EE", "LG"] or LOGO_RE.search(usage) or LOGO_RE.search(title):
+        logo_usages = [
+            "EE",
+            "LG",
+            "L",
+            "BI / L",
+            "VV / L",
+            "VI / L",
+            "BV / L",
+            "OT / L",
+            "CT / L",
+        ]
+        if usage in logo_usages or LOGO_RE.search(usage) or LOGO_RE.search(title):
             continue
         if any(LOGO_RE.search(note or "") for note in notes):
             continue
