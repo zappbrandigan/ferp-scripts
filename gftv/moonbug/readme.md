@@ -8,7 +8,6 @@ naming output files from specific worksheet cells.
 ## FERP Integration
 
 - Operates on a `highlighted directory` or `highlighted file` of type `.xls*` in the File Navigator.
-- Prompts for options unless arguments are preconfigured.
 - Emits per-file progress and logs failures without stopping the batch.
 
 ## Usage

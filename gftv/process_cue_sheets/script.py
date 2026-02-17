@@ -3,6 +3,8 @@ from __future__ import annotations
 import getpass
 import json
 import logging
+import uuid
+import xml.etree.ElementTree as ET
 import math
 import os
 import re
@@ -2620,6 +2622,8 @@ def build_observed_name_variant_map(
 def build_xmp_metadata(
     administrator: str,
     agreements: Sequence[AgreementEntry],
+    *,
+    document_id: str | None = None,
 ) -> bytes:
     """
     Build an XMP packet containing ferp:administrator and ferp:agreements.
@@ -2627,6 +2631,8 @@ def build_xmp_metadata(
     """
     admin_value = normalize_text_value(administrator)
     added_date = datetime.now(timezone.utc).date().isoformat()
+    document_id = document_id or f"uuid:{uuid.uuid4()}"
+    instance_id = f"uuid:{uuid.uuid4()}"
     agreement_items: list[str] = []
     for agreement in agreements:
         publishers = normalize_unique(agreement.get("publishers", []), sort=False)
@@ -2689,10 +2695,13 @@ def build_xmp_metadata(
 <x:xmpmeta xmlns:x="adobe:ns:meta/">
   <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
     <rdf:Description
-      xmlns:ferp="https://tulbox.app/ferp/xmp/1.0">
+      xmlns:ferp="https://tulbox.app/ferp/xmp/1.0"
+      xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/">
       <ferp:administrator>{escape_xml(admin_value)}</ferp:administrator>
       <ferp:dataAddedDate>{escape_xml(added_date)}</ferp:dataAddedDate>
       <ferp:stampSpecVersion>{escape_xml(STAMP_SPEC_VERSION)}</ferp:stampSpecVersion>
+      <xmpMM:DocumentID>{escape_xml(document_id)}</xmpMM:DocumentID>
+      <xmpMM:InstanceID>{escape_xml(instance_id)}</xmpMM:InstanceID>
         {agreement_block}    
     </rdf:Description>
   </rdf:RDF>
@@ -2701,10 +2710,48 @@ def build_xmp_metadata(
     return xmp.encode("utf-8")
 
 
+def _extract_document_id(reader: PdfReader) -> str | None:
+    try:
+        xmp = getattr(reader, "xmp_metadata", None)
+        if xmp is not None:
+            raw = getattr(xmp, "xmpmeta", None)
+            if raw:
+                return _parse_xmp_document_id(str(raw))
+    except Exception:
+        pass
+
+    try:
+        root = reader.trailer.get("/Root", {})
+        metadata = root.get("/Metadata")
+        if metadata is None:
+            return None
+        raw = metadata.get_data()
+        if not raw:
+            return None
+        text = raw.decode("utf-8", errors="ignore")
+        return _parse_xmp_document_id(text)
+    except Exception:
+        return None
+
+
+def _parse_xmp_document_id(xmp_text: str) -> str | None:
+    try:
+        root = ET.fromstring(xmp_text)
+    except ET.ParseError:
+        return None
+    ns = "http://ns.adobe.com/xap/1.0/mm/"
+    elem = root.find(f".//{{{ns}}}DocumentID")
+    if elem is None or not elem.text:
+        return None
+    value = elem.text.strip()
+    return value or None
+
+
 def set_xmp_metadata(
     input_pdf: Path,
     output_pdf: Path,
-    xmp_bytes: bytes,
+    administrator: str,
+    agreements: Sequence[AgreementEntry],
     check_cancel: Callable[[], None] | None = None,
 ) -> None:
     reader = PdfReader(str(input_pdf))
@@ -2723,6 +2770,13 @@ def set_xmp_metadata(
 
     if info:
         writer.add_metadata(info)
+
+    existing_id = _extract_document_id(reader)
+    xmp_bytes = build_xmp_metadata(
+        administrator,
+        agreements,
+        document_id=existing_id,
+    )
 
     md_stream = StreamObject()
     set_data = getattr(md_stream, "set_data", None)
@@ -2747,14 +2801,21 @@ def set_xmp_metadata(
 
 def set_xmp_metadata_inplace(
     pdf_path: Path,
-    xmp_bytes: bytes,
+    administrator: str,
+    agreements: Sequence[AgreementEntry],
     check_cancel: Callable[[], None] | None = None,
 ) -> None:
     dir_name = os.path.dirname(pdf_path)
     with tempfile.NamedTemporaryFile(delete=False, dir=dir_name, suffix=".pdf") as tmp:
         tmp_path = Path(tmp.name)
     try:
-        set_xmp_metadata(pdf_path, tmp_path, xmp_bytes, check_cancel=check_cancel)
+        set_xmp_metadata(
+            pdf_path,
+            tmp_path,
+            administrator,
+            agreements,
+            check_cancel=check_cancel,
+        )
         os.replace(tmp_path, pdf_path)
     finally:
         if tmp_path.exists():
@@ -4083,7 +4144,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     ],
                 }
             ]
-            xmp_bytes = build_xmp_metadata(ADMINISTRATOR_NAME, agreements)
             if in_place:
                 add_stamp(
                     work_path,
@@ -4093,7 +4153,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 )
                 set_xmp_metadata_inplace(
                     pdf_path,
-                    xmp_bytes,
+                    ADMINISTRATOR_NAME,
+                    agreements,
                     check_cancel=api.check_cancel,
                 )
             else:
@@ -4107,7 +4168,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 )
                 set_xmp_metadata_inplace(
                     out_path,
-                    xmp_bytes,
+                    ADMINISTRATOR_NAME,
+                    agreements,
                     check_cancel=api.check_cancel,
                 )
                 created_dirs.add("_stamped")
@@ -4416,7 +4478,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 ],
                 cat_object,
             )
-            xmp_bytes = build_xmp_metadata(ADMINISTRATOR_NAME, agreements)
             if in_place:
                 add_stamp(
                     work_path,
@@ -4427,7 +4488,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 )
                 set_xmp_metadata_inplace(
                     pdf_path,
-                    xmp_bytes,
+                    ADMINISTRATOR_NAME,
+                    agreements,
                     check_cancel=api.check_cancel,
                 )
             else:
@@ -4442,7 +4504,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 )
                 set_xmp_metadata_inplace(
                     out_path,
-                    xmp_bytes,
+                    ADMINISTRATOR_NAME,
+                    agreements,
                     check_cancel=api.check_cancel,
                 )
                 created_dirs.add("_stamped")

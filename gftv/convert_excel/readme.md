@@ -7,7 +7,6 @@ Converts Excel workbooks to PDF using the local Excel application.
 ## FERP Integration
 
 - Operates on a `highlighted directory` or `highlighted file` of type `.xls*` in the File Navigator.
-- Prompts for options unless arguments are preconfigured.
 - Emits per-file progress and logs failures without stopping the batch.
 
 ## Usage
@@ -15,8 +14,9 @@ Converts Excel workbooks to PDF using the local Excel application.
 1. Navigate to the directory containing Excel files (or select a single file).
 2. Run **Convert: Excel to PDF** from the Scripts panel.
 3. Confirm options when prompted:
-   - `recursive` to scan subdirectories.
-   - `test` to process only the first file.
+   - `Recursive` to scan subdirectories.
+   - `Portrait orientation` to switch layout from the default landscape orientation.
+   - `Autofit columns` to autofit column widths (off by default).
 
 ## Behavior
 

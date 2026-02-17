@@ -145,7 +145,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "id": "autofitcolumn",
                 "type": "bool",
                 "label": "Autofit columns",
-                "default": True,
+                "default": False,
             },
             {
                 "id": "portrait",
