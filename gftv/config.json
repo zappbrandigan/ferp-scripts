@@ -1,5 +1,5 @@
 {
-  "version": "1.0.5",
+  "version": "1.0.6",
   "scripts": [
     {
       "id": "gftv.extractor",
@@ -93,7 +93,7 @@
     {
       "id": "gftv.convert_excel",
       "name": "Convert: Excel to PDF",
-      "version": "1.0.6",
+      "version": "1.0.7",
       "script": "scripts/gftv/convert_excel/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
@@ -192,7 +192,7 @@
     {
       "id": "gftv.process_cue_sheets",
       "name": "Process: Stamp Cue Sheets",
-      "version": "1.7.3",
+      "version": "1.7.4",
       "script": "scripts/gftv/process_cue_sheets/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8",
