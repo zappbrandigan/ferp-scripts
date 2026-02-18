@@ -11,7 +11,6 @@ import tempfile
 import unicodedata
 import uuid
 import warnings
-import xml.etree.ElementTree as ET
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,7 +37,12 @@ from reportlab.pdfgen import canvas
 from typing_extensions import Literal
 
 from ferp.fscp.scripts import sdk
-from ferp.fscp.scripts.common import collect_files
+from ferp.fscp.scripts.common import (
+    collect_files,
+    extract_pdf_document_id,
+    generate_document_id,
+    normalize_document_id,
+)
 
 warnings.filterwarnings("ignore", category=PdfReadWarning)
 logging.getLogger("pypdf").setLevel(logging.ERROR)
@@ -2558,7 +2562,11 @@ def build_xmp_metadata(
     """
     admin_value = normalize_text_value(administrator)
     added_date = datetime.now(timezone.utc).date().isoformat()
-    document_id = document_id or f"uuid:{uuid.uuid4()}"
+    if document_id:
+        normalized = normalize_document_id(document_id)
+        document_id = normalized or document_id.strip()
+    if not document_id:
+        document_id = generate_document_id()
     instance_id = f"uuid:{uuid.uuid4()}"
     agreement_items: list[str] = []
     for agreement in agreements:
@@ -2637,48 +2645,12 @@ def build_xmp_metadata(
     return xmp.encode("utf-8")
 
 
-def _extract_document_id(reader: PdfReader) -> str | None:
-    try:
-        xmp = getattr(reader, "xmp_metadata", None)
-        if xmp is not None:
-            raw = getattr(xmp, "xmpmeta", None)
-            if raw:
-                return _parse_xmp_document_id(str(raw))
-    except Exception:
-        pass
-
-    try:
-        root = reader.trailer.get("/Root", {})
-        metadata = root.get("/Metadata")
-        if metadata is None:
-            return None
-        raw = metadata.get_data()
-        if not raw:
-            return None
-        text = raw.decode("utf-8", errors="ignore")
-        return _parse_xmp_document_id(text)
-    except Exception:
-        return None
-
-
-def _parse_xmp_document_id(xmp_text: str) -> str | None:
-    try:
-        root = ET.fromstring(xmp_text)
-    except ET.ParseError:
-        return None
-    ns = "http://ns.adobe.com/xap/1.0/mm/"
-    elem = root.find(f".//{{{ns}}}DocumentID")
-    if elem is None or not elem.text:
-        return None
-    value = elem.text.strip()
-    return value or None
-
-
 def set_xmp_metadata(
     input_pdf: Path,
     output_pdf: Path,
     administrator: str,
     agreements: Sequence[AgreementEntry],
+    document_id: str | None = None,
     check_cancel: Callable[[], None] | None = None,
 ) -> None:
     reader = PdfReader(str(input_pdf))
@@ -2698,7 +2670,7 @@ def set_xmp_metadata(
     if info:
         writer.add_metadata(info)
 
-    existing_id = _extract_document_id(reader)
+    existing_id = document_id or extract_pdf_document_id(reader)
     xmp_bytes = build_xmp_metadata(
         administrator,
         agreements,
@@ -2730,6 +2702,7 @@ def set_xmp_metadata_inplace(
     pdf_path: Path,
     administrator: str,
     agreements: Sequence[AgreementEntry],
+    document_id: str | None = None,
     check_cancel: Callable[[], None] | None = None,
 ) -> None:
     dir_name = os.path.dirname(pdf_path)
@@ -2741,6 +2714,7 @@ def set_xmp_metadata_inplace(
             tmp_path,
             administrator,
             agreements,
+            document_id=document_id,
             check_cancel=check_cancel,
         )
         os.replace(tmp_path, pdf_path)
@@ -4071,6 +4045,14 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     ],
                 }
             ]
+            try:
+                existing_id = extract_pdf_document_id(PdfReader(str(pdf_path)))
+            except Exception as exc:
+                api.log(
+                    "warn",
+                    f"Failed to read DocumentID from '{pdf_path.name}': {exc}",
+                )
+                existing_id = None
             if in_place:
                 add_stamp(
                     work_path,
@@ -4082,6 +4064,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     pdf_path,
                     ADMINISTRATOR_NAME,
                     agreements,
+                    document_id=existing_id,
                     check_cancel=api.check_cancel,
                 )
             else:
@@ -4097,6 +4080,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     out_path,
                     ADMINISTRATOR_NAME,
                     agreements,
+                    document_id=existing_id,
                     check_cancel=api.check_cancel,
                 )
                 created_dirs.add("_stamped")
@@ -4397,6 +4381,14 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 ],
                 cat_object,
             )
+            try:
+                existing_id = extract_pdf_document_id(PdfReader(str(pdf_path)))
+            except Exception as exc:
+                api.log(
+                    "warn",
+                    f"Failed to read DocumentID from '{pdf_path.name}': {exc}",
+                )
+                existing_id = None
             if in_place:
                 add_stamp(
                     work_path,
@@ -4409,6 +4401,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     pdf_path,
                     ADMINISTRATOR_NAME,
                     agreements,
+                    document_id=existing_id,
                     check_cancel=api.check_cancel,
                 )
             else:
@@ -4425,6 +4418,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     out_path,
                     ADMINISTRATOR_NAME,
                     agreements,
+                    document_id=existing_id,
                     check_cancel=api.check_cancel,
                 )
                 created_dirs.add("_stamped")

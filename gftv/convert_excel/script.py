@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import re
 import shutil
-import tempfile
-import uuid
 from pathlib import Path
 from typing import NotRequired, TypedDict
 
-from pypdf import PdfReader, PdfWriter
-from pypdf.generic import NameObject, NumberObject, StreamObject
-
 from ferp.fscp.scripts import sdk
-from ferp.fscp.scripts.common import build_destination, collect_files
+from ferp.fscp.scripts.common import (
+    build_destination,
+    collect_files,
+    generate_document_id,
+    resolve_excel_document_id,
+    set_xmp_mm_metadata_inplace,
+)
 
 
 class UserResponse(TypedDict):
@@ -84,11 +84,6 @@ def _get_print_area(worksheet, include_formulas=False):
     return f"A1:{last_col_letter}{last_row}"
 
 
-_DOC_ID_RE = re.compile(r"ferp:DocumentID=\{([0-9a-fA-F-]+)\}")
-_DOC_ID_PROP_NAME = "ferp:DocumentID"
-_MSO_PROPERTY_TYPE_STRING = 4
-
-
 def _page_setup(worksheet, print_area, autocolumn, portrait):
     """Set default print to pdf page setup options."""
     if autocolumn:
@@ -104,142 +99,6 @@ def _page_setup(worksheet, print_area, autocolumn, portrait):
     worksheet.PageSetup.CenterHeader = ""
     worksheet.PageSetup.RightHeader = ""
     worksheet.PageSetup.PrintArea = print_area
-
-
-def _normalize_uuid(value: str) -> str | None:
-    try:
-        return str(uuid.UUID(value))
-    except ValueError:
-        return None
-
-
-def _extract_document_id_from_custom_property(workbook) -> str | None:
-    try:
-        props = workbook.CustomDocumentProperties
-    except Exception:
-        return None
-    try:
-        prop = props(_DOC_ID_PROP_NAME)
-    except Exception:
-        return None
-    value = _normalize_uuid(str(getattr(prop, "Value", "")).strip())
-    if not value:
-        return None
-    return f"uuid:{value}"
-
-
-def _extract_document_id_from_right_footer(worksheet) -> str | None:
-    footer = getattr(worksheet.PageSetup, "RightFooter", "")
-    if not footer:
-        return None
-    match = _DOC_ID_RE.search(str(footer))
-    if not match:
-        return None
-    value = _normalize_uuid(match.group(1))
-    if not value:
-        return None
-    return f"uuid:{value}"
-
-
-def _set_document_id_property(workbook, document_id: str) -> None:
-    try:
-        props = workbook.CustomDocumentProperties
-    except Exception:
-        return
-    try:
-        prop = props(_DOC_ID_PROP_NAME)
-        prop.Value = document_id
-        return
-    except Exception:
-        pass
-    try:
-        props.Add(_DOC_ID_PROP_NAME, False, _MSO_PROPERTY_TYPE_STRING, document_id)
-    except Exception:
-        return
-
-
-def _set_right_footer_document_id(worksheet, document_id: str) -> None:
-    # Default font/size with white text.
-    worksheet.PageSetup.RightFooter = f"&KFFFFFFferp:DocumentID={{{document_id}}}"
-
-
-def _resolve_document_id(workbook, worksheet) -> str:
-    document_id = _extract_document_id_from_custom_property(workbook)
-    if document_id:
-        return document_id
-    document_id = _extract_document_id_from_right_footer(worksheet)
-    if document_id:
-        return document_id
-    new_value = str(uuid.uuid4())
-    _set_document_id_property(workbook, new_value)
-    _set_right_footer_document_id(worksheet, new_value)
-    return f"uuid:{new_value}"
-
-
-def _build_xmp_mm_metadata(document_id: str | None) -> bytes:
-    document_id = document_id or f"uuid:{uuid.uuid4()}"
-    instance_id = f"uuid:{uuid.uuid4()}"
-    xmp = f"""<?xpacket begin='' id='W5M0MpCehiHzreSzNTczkc9d'?>
-<x:xmpmeta xmlns:x="adobe:ns:meta/">
-  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
-    <rdf:Description xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/">
-      <xmpMM:DocumentID>{document_id}</xmpMM:DocumentID>
-      <xmpMM:InstanceID>{instance_id}</xmpMM:InstanceID>
-    </rdf:Description>
-  </rdf:RDF>
-</x:xmpmeta>
-<?xpacket end='w'?>"""
-    return xmp.encode("utf-8")
-
-
-def _set_xmp_mm_metadata_inplace(pdf_path: Path, document_id: str | None) -> None:
-    reader = PdfReader(str(pdf_path))
-    writer = PdfWriter()
-
-    for page in reader.pages:
-        writer.add_page(page)
-
-    info: dict[str, str] = {}
-    if reader.metadata:
-        for k, v in reader.metadata.items():
-            if isinstance(k, str) and k.startswith("/") and v is not None:
-                info[k] = str(v)
-
-    if info:
-        writer.add_metadata(info)
-
-    xmp_bytes = _build_xmp_mm_metadata(document_id)
-    md_stream = StreamObject()
-    set_data = getattr(md_stream, "set_data", None)
-    if callable(set_data):
-        set_data(xmp_bytes)
-    else:
-        md_stream._data = xmp_bytes
-        md_stream.update({NameObject("/Length"): NumberObject(len(xmp_bytes))})
-    md_stream.update(
-        {
-            NameObject("/Type"): NameObject("/Metadata"),
-            NameObject("/Subtype"): NameObject("/XML"),
-        }
-    )
-
-    md_ref = writer._add_object(md_stream)
-    writer._root_object.update({NameObject("/Metadata"): md_ref})
-
-    with tempfile.NamedTemporaryFile(
-        delete=False,
-        dir=str(pdf_path.parent),
-        suffix=".pdf",
-    ) as tmp:
-        tmp_path = Path(tmp.name)
-
-    try:
-        with tmp_path.open("wb") as handle:
-            writer.write(handle)
-        tmp_path.replace(pdf_path)
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
 
 
 def _column_letter(index: int) -> str:
@@ -368,6 +227,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         xl_window = _start_excel()
     converted: list[str] = []
     failures: list[str] = []
+    logged_metadata_skip = False
 
     try:
         for index, file_path in enumerate(xl_files, start=1):
@@ -382,15 +242,28 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         f"Worksheet not found for '{sheet_value or 'active sheet'}'."
                     )
                 print_area = _get_print_area(worksheet)
-                document_id = _resolve_document_id(workbook, worksheet)
+                document_id = None
+                if file_path.suffix.lower() == ".xlsx":
+                    document_id = resolve_excel_document_id(workbook, worksheet)
+                else:
+                    document_id = generate_document_id()
+                    if not logged_metadata_skip:
+                        api.log(
+                            "info",
+                            "Non-xlsx files won't store ferp:DocumentID in Excel; adding ID to PDFs only.",
+                        )
+                        logged_metadata_skip = True
                 _page_setup(worksheet, print_area, autofit_colulmn, portrait)
                 out_path = build_destination(file_path.parent, file_path.stem, ".pdf")
                 workbook.Save()
                 worksheet.ExportAsFixedFormat(0, str(out_path))
                 try:
-                    _set_xmp_mm_metadata_inplace(out_path, document_id)
+                    if document_id:
+                        set_xmp_mm_metadata_inplace(out_path, document_id)
                 except Exception as exc:
-                    api.log("warn", f"Failed to add XMP metadata to '{out_path}': {exc}")
+                    api.log(
+                        "warn", f"Failed to add XMP metadata to '{out_path}': {exc}"
+                    )
                 converted.append(str(out_path))
                 api.progress(current=index, total=total_files, unit="files")
             except Exception as exc:
@@ -405,10 +278,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     api.emit_result(
         {
             "_title": "Excel Conversion Summary",
-            "Converted": converted,
-            "Autofit Column": autofit_colulmn,
             "Failures": failures,
-            "Files Found": total_files,
+            "Converted": f"{len(converted)} files",
         }
     )
 
