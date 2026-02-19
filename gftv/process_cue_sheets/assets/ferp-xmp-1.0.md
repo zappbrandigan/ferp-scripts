@@ -86,7 +86,26 @@ The metadata is intended to be:
 
 ---
 
-### 5.2 Data Added Date
+### 5.2 Catalog Code
+
+**Property:** `ferp:catalogCode`
+
+* **Type:** `xsd:string`
+* **Cardinality:** 0..1
+* **Order:** N/A
+* **Semantics:**
+  The primary catalog code used to resolve the publisher set for the stamp.
+* **Authority:** Optional; present when provided by the stamping workflow.
+
+#### Example
+
+```xml
+<ferp:catalogCode>CODE</ferp:catalogCode>
+```
+
+---
+
+### 5.3 Data Added Date
 
 **Property:** `ferp:dataAddedDate`
 
@@ -105,7 +124,7 @@ The metadata is intended to be:
 
 ---
 
-### 5.3 Stamp Specification Version
+### 5.4 Stamp Specification Version
 
 **Property:** `ferp:stampSpecVersion`
 
@@ -124,7 +143,7 @@ The metadata is intended to be:
 
 ---
 
-### 5.4 Agreements
+### 5.5 Agreements
 
 **Property:** `ferp:agreements`
 
@@ -153,6 +172,14 @@ Within each agreement entry (`rdf:Description`):
 * **Order:** Oldest to newest
 * **Semantics:** Each entry represents an effective date paired with its applicable territories.
 
+**Property:** `ferp:date`
+
+* **Type:** `xsd:date`
+* **Cardinality:** 1..1
+* **Order:** N/A
+* **Semantics:** Effective date for the associated territory list.
+* **Notes:** Current writers MAY omit this while effective date data is under development; readers should tolerate missing values.
+
 **Property:** `ferp:territories`
 
 * **Type:** `rdf:Bag` of `rdf:li` (`xsd:string`)
@@ -164,9 +191,10 @@ Within each agreement entry (`rdf:Description`):
 
 ## 6) Normalization Rules
 
-Normalization MUST be applied before writing `ferp:administrator` and `ferp:agreements`.
+Normalization MUST be applied before writing `ferp:administrator`, `ferp:catalogCode`,
+and `ferp:agreements`.
 
-For administrator and publisher/territory values:
+For administrator, catalog code, and publisher/territory values:
 
 1. Trim leading and trailing whitespace.
 2. Collapse internal whitespace to a single ASCII space (`U+0020`).
@@ -204,6 +232,7 @@ A compliant writer MUST:
 
 A compliant writer MAY:
 
+* Write `ferp:catalogCode` when available.
 * Preserve unrelated existing XMP content when updating metadata.
 
 ---
@@ -212,8 +241,8 @@ A compliant writer MAY:
 
 A compliant reader MUST:
 
-1. Read `ferp:administrator`, `ferp:dataAddedDate`, `ferp:stampSpecVersion`, and
-   `ferp:agreements` from XMP if present.
+1. Read `ferp:administrator`, `ferp:catalogCode`, `ferp:dataAddedDate`, `ferp:stampSpecVersion`,
+   `ferp:agreements`, and `ferp:catalogCode` from XMP if present.
 2. Apply normalization rules after reading.
 
 ### Authority Rule
@@ -232,6 +261,7 @@ If multiple sources are present and differ:
   <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
     <rdf:Description xmlns:ferp="https://tulbox.app/ferp/xmp/1.0">
       <ferp:administrator>Tulbox Music Publishing</ferp:administrator>
+      <ferp:catalogCode>uvs</ferp:catalogCode>
       <ferp:dataAddedDate>2026-02-02</ferp:dataAddedDate>
       <ferp:stampSpecVersion>1.0</ferp:stampSpecVersion>
       <ferp:agreements>

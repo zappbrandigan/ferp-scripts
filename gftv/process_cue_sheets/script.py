@@ -2554,6 +2554,7 @@ def build_xmp_metadata(
     administrator: str,
     agreements: Sequence[AgreementEntry],
     *,
+    catalog_code: str | None = None,
     document_id: str | None = None,
 ) -> bytes:
     """
@@ -2561,6 +2562,12 @@ def build_xmp_metadata(
     Returns UTF-8 XML bytes.
     """
     admin_value = normalize_text_value(administrator)
+    catalog_value = normalize_text_value(catalog_code) if catalog_code else ""
+    catalog_line = ""
+    if catalog_value:
+        catalog_line = (
+            f"      <ferp:catalogCode>{escape_xml(catalog_value)}</ferp:catalogCode>\n"
+        )
     added_date = datetime.now(timezone.utc).date().isoformat()
     if document_id:
         normalized = normalize_document_id(document_id)
@@ -2633,7 +2640,7 @@ def build_xmp_metadata(
       xmlns:ferp="https://tulbox.app/ferp/xmp/1.0"
       xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/">
       <ferp:administrator>{escape_xml(admin_value)}</ferp:administrator>
-      <ferp:dataAddedDate>{escape_xml(added_date)}</ferp:dataAddedDate>
+{catalog_line}      <ferp:dataAddedDate>{escape_xml(added_date)}</ferp:dataAddedDate>
       <ferp:stampSpecVersion>{escape_xml(STAMP_SPEC_VERSION)}</ferp:stampSpecVersion>
       <xmpMM:DocumentID>{escape_xml(document_id)}</xmpMM:DocumentID>
       <xmpMM:InstanceID>{escape_xml(instance_id)}</xmpMM:InstanceID>
@@ -2650,6 +2657,7 @@ def set_xmp_metadata(
     output_pdf: Path,
     administrator: str,
     agreements: Sequence[AgreementEntry],
+    catalog_code: str | None = None,
     document_id: str | None = None,
     check_cancel: Callable[[], None] | None = None,
 ) -> None:
@@ -2674,6 +2682,7 @@ def set_xmp_metadata(
     xmp_bytes = build_xmp_metadata(
         administrator,
         agreements,
+        catalog_code=catalog_code,
         document_id=existing_id,
     )
 
@@ -2702,6 +2711,7 @@ def set_xmp_metadata_inplace(
     pdf_path: Path,
     administrator: str,
     agreements: Sequence[AgreementEntry],
+    catalog_code: str | None = None,
     document_id: str | None = None,
     check_cancel: Callable[[], None] | None = None,
 ) -> None:
@@ -2714,6 +2724,7 @@ def set_xmp_metadata_inplace(
             tmp_path,
             administrator,
             agreements,
+            catalog_code=catalog_code,
             document_id=document_id,
             check_cancel=check_cancel,
         )
@@ -3772,6 +3783,9 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     custom_stamp = payload["custom_stamp"]
     codes = parse_catalog_codes(payload["value"])
+    catalog_code = codes[0] if codes else None
+    if catalog_code:
+        catalog_code = catalog_code.split("-", 1)[0].strip().upper() or None
     if not codes and not custom_stamp:
         api.emit_result(
             {
@@ -4064,6 +4078,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     pdf_path,
                     ADMINISTRATOR_NAME,
                     agreements,
+                    catalog_code=catalog_code,
                     document_id=existing_id,
                     check_cancel=api.check_cancel,
                 )
@@ -4080,6 +4095,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     out_path,
                     ADMINISTRATOR_NAME,
                     agreements,
+                    catalog_code=catalog_code,
                     document_id=existing_id,
                     check_cancel=api.check_cancel,
                 )
@@ -4401,6 +4417,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     pdf_path,
                     ADMINISTRATOR_NAME,
                     agreements,
+                    catalog_code=catalog_code,
                     document_id=existing_id,
                     check_cancel=api.check_cancel,
                 )
@@ -4418,6 +4435,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     out_path,
                     ADMINISTRATOR_NAME,
                     agreements,
+                    catalog_code=catalog_code,
                     document_id=existing_id,
                     check_cancel=api.check_cancel,
                 )
