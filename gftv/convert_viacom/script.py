@@ -112,6 +112,7 @@ def _column_letter(index: int) -> str:
 
 def _cleanup_sheet(worksheet) -> None:
     worksheet.Columns("L:N").Delete()
+    worksheet.Columns("I:I").Delete()
     worksheet.Columns("E:E").AutoFit()
     worksheet.Rows.AutoFit()
 
