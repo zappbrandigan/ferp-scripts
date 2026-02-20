@@ -1802,6 +1802,94 @@ def parse_fox_sports(
 
 
 # =================================================
+# VIA
+# =================================================
+
+VIA_HEADER_RE = re.compile(
+    r"\s*#?\s*Musical\s*Performer\(s\)\s*Writer\(s\)\s*Publisher\(s\)?\s*\/\s*Time\s*In \s*\/\s*Time\s*Use\s*Type",
+    re.IGNORECASE,
+)
+
+
+def is_via_pdf(text: str) -> bool:
+    if not text:
+        return False
+    return bool(VIA_HEADER_RE.search(text))
+
+
+def parse_via(
+    pdf,
+    log_fn: Optional[Callable[[str], None]] = None,
+    check_cancel: Callable[[], None] | None = None,
+) -> list[Dict[str, Any]]:
+    """
+    Parse VIA cue sheets into a list of cue dictionaries.
+
+    Output schema:
+      {
+        "cue_no": str,
+        "title": str | None,
+        "composers": str | None,
+        "publishers": [{"name": ...}],
+        "usage": str | None,
+      }
+    """
+    cues: list[Dict[str, Any]] = []
+    pages_scanned = 0
+    pages_with_tables = 0
+    rows_total = 0
+    header_map = {
+        "cue_no": 0,
+        "title": 1,
+        "usage": 6,
+        "composers": 3,
+        "publishers": 4,
+    }
+    skipped_pub_count = 0
+    SKIP_PUB = re.compile(r"extreme\smusic\slibrary", re.IGNORECASE)
+
+    def clean(value):
+        if not value:
+            return ""
+        return str(value).replace("\n", " ").replace("/", " ").strip()
+
+    for page in pdf.pages:
+        if check_cancel is not None:
+            check_cancel()
+        pages_scanned += 1
+        pages_with_tables += 1
+        table = page.extract_table() or []
+        for row in table:
+            rows_total += 1
+            row = (row + [""] * 10)[:10]
+            header_text = " ".join([str(cell or "") for cell in row[:10]])
+            if VIA_HEADER_RE.search(header_text):
+                continue
+            publishers = clean(row[header_map["publishers"]])
+            if SKIP_PUB.search(publishers):
+                skipped_pub_count += 1
+                continue
+            cues.append(
+                {
+                    "cue_no": clean(row[header_map["cue_no"]]),
+                    "title": clean(row[header_map["title"]]),
+                    "usage": clean(row[header_map["usage"]]),
+                    "composers": clean(row[header_map["composers"]]),
+                    "publishers": [{"name": publishers}],
+                }
+            )
+
+    if log_fn:
+        log_fn(
+            "via parser: "
+            f"pages={pages_scanned} | pages_with_table={pages_with_tables} | "
+            f"rows={rows_total} | cues={len(cues)} | skipped_pubs={skipped_pub_count}"
+        )
+        # log_fn(f"via text: cues={cues}")
+    return cues
+
+
+# =================================================
 # Default parser (unknown format)
 # =================================================
 def default_extract_lines(
@@ -1960,6 +2048,7 @@ def detect_format(
     "nbc_standard",
     "silvermouse",
     "fox_sports",
+    "viacom",
     "unknown",
     "needs_ocr",
 ]:
@@ -1983,6 +2072,8 @@ def detect_format(
         return "nbc_standard"
     elif is_fox_sports_pdf(text):
         return "fox_sports"
+    elif is_via_pdf(text):
+        return "viacom"
     # Soundmouse landscape has a title page with no column headers
     elif second_page and is_soundmouse_landscape_pdf(
         text + (second_page.extract_text() or "")
@@ -2004,6 +2095,7 @@ def filter_logos(cues: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
             "EE",
             "LG",
             "L",
+            "LT",
             "BI / L",
             "VV / L",
             "VI / L",
@@ -2040,6 +2132,8 @@ _CORP_SUFFIXES = {
     "PLC",
     "SA",
     "SL",
+    "SPA",
+    "SRL",
 }
 
 _STOPWORDS = {
@@ -4163,6 +4257,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
                         check_cancel=api.check_cancel,
                     )
+                elif fmt == "viacom":
+                    raw_cues = parse_via(
+                        pdf,
+                        log_fn=lambda msg: api.log("debug", f"{pdf_path.name}: {msg}"),
+                        check_cancel=api.check_cancel,
+                    )
                 elif fmt == "needs_ocr":
                     needs_ocr = True
                 else:
@@ -4202,6 +4302,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "nbc_standard",
                 "silvermouse",
                 "fox_sports",
+                "viacom",
             ]
             if use_phrase_match:
                 result = find_controlled_publishers_present_phrase(

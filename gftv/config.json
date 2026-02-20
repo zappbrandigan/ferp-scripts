@@ -91,6 +91,21 @@
       ]
     },
     {
+      "id": "gftv.convert_viacom",
+      "name": "Convert: Viacom to PDF",
+      "version": "1.0.0",
+      "script": "scripts/gftv/convert_viacom/script.py",
+      "dependencies": [
+        "pywin32>=306; platform_system == \"Windows\""
+      ],
+      "target": [
+        "highlighted_file"
+      ],
+      "file_extensions": [
+        ".xlsx"
+      ]
+    },
+    {
       "id": "gftv.convert_excel",
       "name": "Convert: Excel to PDF",
       "version": "1.0.10",
