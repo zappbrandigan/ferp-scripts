@@ -193,6 +193,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             skip_show_types = {"digital", "podcast"}
             for sheet_index in range(1, sheet_total + 1):
                 worksheet = workbook.Worksheets(sheet_index)
+                api.progress(current=sheet_index, total=sheet_total, unit="sheets")
                 show_type = _normalize_show_type(_extract_show_type(worksheet))
                 if show_type in skip_show_types:
                     api.log(
@@ -215,7 +216,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         "warn", f"Failed to add XMP metadata to '{out_path}': {exc}"
                     )
                 converted.append(str(out_path))
-                api.progress(current=sheet_index, total=sheet_total, unit="sheets")
         except Exception as exc:
             api.log("warn", f"Failed to process '{target}': {exc}")
             failures.append(f"{target}: {exc}")
