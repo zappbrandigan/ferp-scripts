@@ -8,9 +8,6 @@ from ferp.fscp.scripts import sdk
 from ferp.fscp.scripts.common import (
     build_destination,
     collect_files,
-    generate_document_id,
-    resolve_excel_document_id,
-    set_xmp_mm_metadata_inplace,
 )
 
 
@@ -227,8 +224,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         xl_window = _start_excel()
     converted: list[str] = []
     failures: list[str] = []
-    logged_metadata_skip = False
-
     try:
         for index, file_path in enumerate(xl_files, start=1):
             # coversion is slow, emit every iteration
@@ -242,28 +237,9 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         f"Worksheet not found for '{sheet_value or 'active sheet'}'."
                     )
                 print_area = _get_print_area(worksheet)
-                document_id = None
-                if file_path.suffix.lower() == ".xlsx":
-                    document_id = resolve_excel_document_id(workbook, worksheet)
-                else:
-                    document_id = generate_document_id()
-                    if not logged_metadata_skip:
-                        api.log(
-                            "info",
-                            "Non-xlsx files won't store ferp:DocumentID in Excel; adding ID to PDFs only.",
-                        )
-                        logged_metadata_skip = True
                 _page_setup(worksheet, print_area, autofit_colulmn, portrait)
                 out_path = build_destination(file_path.parent, file_path.stem, ".pdf")
-                workbook.Save()
                 worksheet.ExportAsFixedFormat(0, str(out_path))
-                try:
-                    if document_id:
-                        set_xmp_mm_metadata_inplace(out_path, document_id)
-                except Exception as exc:
-                    api.log(
-                        "warn", f"Failed to add XMP metadata to '{out_path}': {exc}"
-                    )
                 converted.append(str(out_path))
                 api.progress(current=index, total=total_files, unit="files")
             except Exception as exc:

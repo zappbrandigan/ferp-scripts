@@ -9,10 +9,7 @@ from ferp.fscp.scripts import sdk
 from ferp.fscp.scripts.common import (
     build_destination,
     collect_files,
-    generate_document_id,
     move_to_dir,
-    resolve_excel_document_id,
-    set_xmp_mm_metadata_inplace,
 )
 
 
@@ -237,8 +234,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     moved_to_none: set[Path] = set()
     converted: list[str] = []
     failures: list[str] = []
-    logged_metadata_skip = False
-
     try:
         for index, file in enumerate(xl_files, start=1):
             # conversion is slow, emit every iteration
@@ -258,18 +253,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 worksheet = workbook.Worksheets(1)
                 print_area = _get_print_area(worksheet)
                 _page_setup(worksheet, print_area, autofit_column)
-                document_id = None
-                if file.suffix.lower() == ".xlsx":
-                    document_id = resolve_excel_document_id(workbook, worksheet)
-                else:
-                    document_id = generate_document_id()
-                    if not logged_metadata_skip:
-                        api.log(
-                            "info",
-                            "Non-xlsx files won't store ferp:DocumentID in Excel; adding ID to PDFs only.",
-                        )
-                        logged_metadata_skip = True
-                workbook.Save()
                 base_name = _get_outfile_from_cells(worksheet)
                 is_none_vrsn = bool(base_name and "None Vrsn" in base_name)
                 base_pdf = parent_dir / f"{base_name}.pdf"
@@ -282,14 +265,6 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     force_suffix=collision,
                 )
                 _export_pdf(workbook, destination)
-                try:
-                    if document_id:
-                        set_xmp_mm_metadata_inplace(destination, document_id)
-                except Exception as exc:
-                    api.log(
-                        "warn",
-                        f"Failed to add XMP metadata to '{destination}': {exc}",
-                    )
                 converted.append(str(destination))
                 api.progress(
                     current=index,
