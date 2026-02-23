@@ -15,7 +15,7 @@ the filename or the publisher names found in the FERP XMP stamp metadata.
 
 1. Highlight a PDF file or folder containing cue sheet PDFs.
 2. Run `Organize: Group Cue Sheets` from the Scripts panel.
-3. Choose whether to group by `production` or `publishers`.
+3. Choose whether to group by `production`, `publishers`, or `catalog code`.
 
 ## Behavior
 
@@ -27,6 +27,10 @@ the filename or the publisher names found in the FERP XMP stamp metadata.
   - Reads FERP XMP metadata (`ferp:agreements -> publishers`).
   - Lowercases each publisher, replaces spaces with `-`, and joins publishers with `_`.
   - Skips PDFs without publisher metadata or encrypted PDFs and logs a warning.
+- **Catalog code mode**
+  - Reads FERP XMP metadata (`ferp:catalogCode`).
+  - Lowercases the catalog code, replaces spaces with `-`, and joins multiple values with `_`.
+  - Skips PDFs without catalog code metadata or encrypted PDFs and logs a warning.
 - Folder names are truncated to 60 characters with `...` if needed.
 
 ## Notes

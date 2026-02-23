@@ -128,6 +128,34 @@ def _format_header_markdown(header: dict[str, str]) -> list[str]:
     return lines
 
 
+def _format_top_extensions(counter: Counter[str], limit: int = 5) -> list[str]:
+    if not counter:
+        return ["(none)"]
+    lines: list[str] = []
+    for ext, count in counter.most_common(limit):
+        label = ext or "<no ext>"
+        lines.append(f"{label}: {count}")
+    return lines
+
+
+def _format_top_directories(
+    entries: list[dict[str, object]], limit: int = 5
+) -> list[str]:
+    ranked = sorted(
+        entries,
+        key=lambda entry: (
+            -int(cast(int, entry["total_files"])),
+            cast(str, entry["relative_path"] or "."),
+        ),
+    )
+    lines: list[str] = []
+    for entry in ranked[:limit]:
+        rel_path = cast(str, entry["relative_path"] or ".")
+        total = cast(int, entry["total_files"])
+        lines.append(f"{rel_path or '.'}: {total} file(s)")
+    return lines or ["(none)"]
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     root = ctx.target_path
@@ -137,6 +165,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     )
 
     summary = []
+    overall_extensions: Counter[str] = Counter()
     for directory, rel_path, file_counter in _walk(root, check_cancel=api.check_cancel):
         api.check_cancel()
         total = sum(file_counter.values())
@@ -146,6 +175,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             "extensions": dict(sorted(file_counter.items())),
         }
         summary.append(entry)
+        overall_extensions.update(file_counter)
         ext_details = ", ".join(
             f"{ext or '<no ext>'}: {count}"
             for ext, count in entry["extensions"].items()
@@ -193,7 +223,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             "Markdown Path": str(export_path.relative_to(root.parents[1]))
             if export_path
             else "Not exported.",
-            "Extension Details": "\n" + "\n".join(lines),
+            "Top Extensions": "\n" + "\n".join(_format_top_extensions(overall_extensions)),
+            "Top Directories": "\n" + "\n".join(_format_top_directories(summary)),
         }
     )
 

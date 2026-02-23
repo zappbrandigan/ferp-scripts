@@ -69,6 +69,35 @@ def _parse_publishers(xmp: str) -> list[str]:
     return publishers
 
 
+def _collect_xmp_values(elem: ET.Element) -> list[str]:
+    values: list[str] = []
+    if elem.text and elem.text.strip():
+        values.append(elem.text.strip())
+    for child in elem.iter():
+        if child is elem:
+            continue
+        if child.text and child.text.strip():
+            values.append(child.text.strip())
+    return values
+
+
+def _parse_catalog_codes(xmp: str) -> list[str]:
+    match = re.search(r"(<x:xmpmeta\b.*?</x:xmpmeta>)", xmp, re.DOTALL)
+    xml_payload = match.group(1) if match else xmp
+    try:
+        root = ET.fromstring(xml_payload)
+    except ET.ParseError:
+        return []
+
+    ferp_ns = "https://tulbox.app/ferp/xmp/1.0"
+    values: list[str] = []
+    catalog = root.find(f".//{{{ferp_ns}}}catalogCode")
+    if catalog is None:
+        return []
+    values.extend(_collect_xmp_values(catalog))
+    return [value for value in values if value]
+
+
 def _truncate_name(value: str, max_len: int = MAX_FOLDER_LENGTH) -> str:
     if len(value) <= max_len:
         return value
@@ -140,6 +169,40 @@ def _publisher_group(path: Path) -> tuple[str | None, str | None]:
     return folder, None
 
 
+def _catalog_group(path: Path) -> tuple[str | None, str | None]:
+    try:
+        reader = PdfReader(str(path))
+    except Exception as exc:  # noqa: BLE001
+        return None, f"failed to read PDF ({exc})"
+
+    if reader.is_encrypted:
+        return None, "encrypted PDF"
+
+    xmp = _extract_xmp(reader)
+    if not xmp:
+        return None, "missing XMP metadata"
+
+    codes = _parse_catalog_codes(xmp)
+    if not codes:
+        return None, "missing catalog code metadata"
+
+    sanitized: list[str] = []
+    for code in codes:
+        cleaned = _sanitize_segment(code, space_replacement="-")
+        if cleaned:
+            sanitized.append(cleaned)
+
+    if not sanitized:
+        return None, "invalid catalog code metadata"
+
+    folder = "_".join(sanitized)
+    folder = _truncate_name(folder)
+    if not folder:
+        return None, "invalid catalog code metadata"
+
+    return folder, None
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     root = ctx.target_path
@@ -152,7 +215,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "id": "mode",
                 "type": "select",
                 "label": "Group By",
-                "options": ["production", "publishers"],
+                "options": ["production", "publishers", "catalog code"],
                 "default": "production",
             }
         ],
@@ -188,8 +251,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         api.check_cancel()
         if selection == "production":
             folder, reason = _production_group(pdf_path.name)
-        else:
+        elif selection == "publishers":
             folder, reason = _publisher_group(pdf_path)
+        else:
+            folder, reason = _catalog_group(pdf_path)
 
         if not folder:
             skipped += 1
