@@ -1,5 +1,5 @@
 {
-  "version": "1.0.13",
+  "version": "1.1.0",
   "scripts": [
     {
       "id": "gftv.extractor",
@@ -75,7 +75,7 @@
     {
       "id": "gftv.moonbug",
       "name": "Convert: Moonbug to PDF",
-      "version": "1.0.8",
+      "version": "1.1.0",
       "script": "scripts/gftv/moonbug/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
@@ -108,7 +108,7 @@
     {
       "id": "gftv.convert_excel",
       "name": "Convert: Excel to PDF",
-      "version": "1.0.10",
+      "version": "1.1.0",
       "script": "scripts/gftv/convert_excel/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
