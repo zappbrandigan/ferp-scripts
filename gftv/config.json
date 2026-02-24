@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "scripts": [
     {
       "id": "gftv.extractor",
@@ -93,7 +93,7 @@
     {
       "id": "gftv.convert_viacom",
       "name": "Convert: Viacom to PDF",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "script": "scripts/gftv/convert_viacom/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
@@ -108,7 +108,7 @@
     {
       "id": "gftv.convert_excel",
       "name": "Convert: Excel to PDF",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "script": "scripts/gftv/convert_excel/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
