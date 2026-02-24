@@ -22,12 +22,15 @@ page setup.
 - Skips sheets where `D12` indicates `Show Type: Digital` or `Show Type: Podcast`.
 - Cleans each sheet before export:
   - Deletes columns `L:N`.
+  - Deletes column `I`.
   - Autofits column `E`.
   - Autofits all rows.
 - Computes print area automatically and applies standard page setup.
 - Exports each worksheet as a separate PDF named `via_{Sheet}`.
-- Writes PDFs into a `via_converted` subfolder next to the source workbook.
-- Adds XMP metadata with the workbook's `ferp:DocumentID` for `.xlsx` files.
+- Writes PDFs into a `via_converted/{group}` subfolder next to the source workbook.
+  - The group is read from `P9` (e.g. `Production Group: <name>`), normalized to lowercase with `-` separators.
+  - Missing or empty `P9` values go to a `_unknown` folder.
+- Adds XMP metadata with a newly generated `ferp:DocumentID` for each exported PDF.
 
 ## Notes
 

@@ -46,7 +46,7 @@ formats, and tags matched publishers with XMP metadata and a stamped badge.
 Different cue sheet formats yield different parsing granularity. This affects how
 publishers are matched and how co-publishers are detected.
 
-- Soundmouse, RapidCue, WB, Cuetrak, Silvermouse, NBC Standard, and Fox Sports: These parsers operate on per-cue rows, so
+- Soundmouse, RapidCue, Cuetrak, Silvermouse, VIA, WB, NBC Standard, and Fox Sports: These parsers operate on per-cue rows, so
   main/co-publisher matching happens within the same cue. Co-publishers are only
   considered if a main publisher is matched in that cue.
 - Default/unknown: This parser does not have a per-cue notion. It scans the full

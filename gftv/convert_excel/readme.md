@@ -17,6 +17,7 @@ Converts Excel workbooks to PDF using the local Excel application.
    - `Recursive` to scan subdirectories.
    - `Portrait orientation` to switch layout from the default landscape orientation.
    - `Autofit columns` to autofit column widths (off by default).
+   - `Autofit rows` to autofit row heights (off by default).
 
 ## Behavior
 

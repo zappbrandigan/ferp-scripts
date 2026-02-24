@@ -134,10 +134,31 @@ def _extract_show_type(worksheet) -> str | None:
     return text
 
 
+def _extract_production_group(worksheet) -> str | None:
+    raw = worksheet.Range("P9").Value
+    if not raw:
+        return None
+    text = str(raw).strip()
+    if ":" in text:
+        _, value = text.split(":", 1)
+        return value.strip()
+    return text
+
+
 def _normalize_show_type(value: str | None) -> str:
     if not value:
         return ""
     return str(value).strip().lower()
+
+
+def _normalize_group_folder(value: str | None) -> str:
+    if not value:
+        return "_unknown"
+    cleaned = re.sub(r"[<>:\\\"/|?!*]", " ", value)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
+    if not cleaned:
+        return "_unknown"
+    return cleaned.replace(" ", "-")
 
 
 @sdk.script
@@ -201,13 +222,18 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         f"Skipping sheet '{worksheet.Name}' (Show Type: {show_type}).",
                     )
                     continue
+                group_folder = _normalize_group_folder(
+                    _extract_production_group(worksheet)
+                )
+                group_dir = output_dir / group_folder
+                group_dir.mkdir(parents=True, exist_ok=True)
                 _cleanup_sheet(worksheet)
                 print_area = _get_print_area(worksheet)
                 _page_setup(worksheet, print_area)
                 document_id = generate_document_id()
                 sheet_name = _sanitize_filename_component(worksheet.Name)
                 out_base = f"via_{sheet_name}"
-                out_path = build_destination(output_dir, out_base, ".pdf")
+                out_path = build_destination(group_dir, out_base, ".pdf")
                 worksheet.ExportAsFixedFormat(0, str(out_path))
                 try:
                     set_xmp_mm_metadata_inplace(out_path, document_id)

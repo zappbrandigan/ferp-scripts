@@ -14,6 +14,7 @@ from ferp.fscp.scripts.common import (
 class UserResponse(TypedDict):
     value: str
     autofitcolumn: bool
+    autofitrows: bool
     portrait: bool
     recursive: NotRequired[bool]
 
@@ -81,10 +82,12 @@ def _get_print_area(worksheet, include_formulas=False):
     return f"A1:{last_col_letter}{last_row}"
 
 
-def _page_setup(worksheet, print_area, autocolumn, portrait):
+def _page_setup(worksheet, print_area, autocolumn, autofitrows, portrait):
     """Set default print to pdf page setup options."""
     if autocolumn:
         worksheet.Columns.AutoFit()
+    if autofitrows:
+        worksheet.Rows.AutoFit()
     worksheet.PageSetup.PaperSize = 9  # xlPaperA4
     worksheet.PageSetup.Zoom = False
     worksheet.PageSetup.Orientation = 1 if portrait else 2  # portrait:1, landscape:2
@@ -155,6 +158,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "default": False,
             },
             {
+                "id": "autofitrows",
+                "type": "bool",
+                "label": "Autofit rows",
+                "default": False,
+            },
+            {
                 "id": "portrait",
                 "type": "bool",
                 "label": "Portrait orientation",
@@ -168,6 +177,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     recursive = payload.get("recursive", False)
     autofit_colulmn = payload["autofitcolumn"]
+    autofit_rows = payload["autofitrows"]
     portrait = payload["portrait"]
     sheet_value = payload.get("value", "").strip()
 
@@ -237,7 +247,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         f"Worksheet not found for '{sheet_value or 'active sheet'}'."
                     )
                 print_area = _get_print_area(worksheet)
-                _page_setup(worksheet, print_area, autofit_colulmn, portrait)
+                _page_setup(
+                    worksheet,
+                    print_area,
+                    autofit_colulmn,
+                    autofit_rows,
+                    portrait,
+                )
                 out_path = build_destination(file_path.parent, file_path.stem, ".pdf")
                 worksheet.ExportAsFixedFormat(0, str(out_path))
                 converted.append(str(out_path))
