@@ -118,7 +118,15 @@ def _cleanup_sheet(worksheet) -> None:
 
 
 def _sanitize_filename_component(value: str) -> str:
-    cleaned = re.sub(r"[<>:\\\"/|?!*]", " ", value)
+    cleaned = (
+        value.replace("\u2018", "'")
+        .replace("\u2019", "'")
+        .replace("\u201C", '"')
+        .replace("\u201D", '"')
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+    )
+    cleaned = re.sub(r"[<>:\\\"/|?!*]", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned or "Sheet"
 
@@ -135,14 +143,18 @@ def _extract_show_type(worksheet) -> str | None:
 
 
 def _extract_production_group(worksheet) -> str | None:
-    raw = worksheet.Range("P9").Value
-    if not raw:
-        return None
-    text = str(raw).strip()
-    if ":" in text:
-        _, value = text.split(":", 1)
-        return value.strip()
-    return text
+    for cell in ("P9", "O9"):
+        raw = worksheet.Range(cell).Value
+        if not raw:
+            continue
+        text = str(raw).strip()
+        if not text:
+            continue
+        if ":" in text:
+            _, value = text.split(":", 1)
+            return value.strip()
+        return text
+    return None
 
 
 def _normalize_show_type(value: str | None) -> str:

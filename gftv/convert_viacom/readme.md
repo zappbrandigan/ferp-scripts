@@ -28,7 +28,7 @@ page setup.
 - Computes print area automatically and applies standard page setup.
 - Exports each worksheet as a separate PDF named `via_{Sheet}`.
 - Writes PDFs into a `via_converted/{group}` subfolder next to the source workbook.
-  - The group is read from `P9` (e.g. `Production Group: <name>`), normalized to lowercase with `-` separators.
+  - The group is read from `P9` or `O9` (e.g. `Production Group: <name>`), normalized to lowercase with `-` separators.
   - Missing or empty `P9` values go to a `_unknown` folder.
 - Adds XMP metadata with a newly generated `ferp:DocumentID` for each exported PDF.
 
