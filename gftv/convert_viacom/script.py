@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path
-from typing import NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from ferp.fscp.scripts import sdk
 from ferp.fscp.scripts.common import (
@@ -118,15 +118,7 @@ def _cleanup_sheet(worksheet) -> None:
 
 
 def _sanitize_filename_component(value: str) -> str:
-    cleaned = (
-        value.replace("\u2018", "'")
-        .replace("\u2019", "'")
-        .replace("\u201c", '"')
-        .replace("\u201d", '"')
-        .replace("\u2013", "-")
-        .replace("\u2014", "-")
-    )
-    cleaned = re.sub(r"[<>:\\\"/|?!*]", " ", cleaned)
+    cleaned = re.sub(r"[<>:\\\"/|?!*]", " ", value)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned or "Sheet"
 
@@ -169,7 +161,15 @@ def _normalize_show_type(value: str | None) -> str:
 def _normalize_group_folder(value: str | None) -> str:
     if not value:
         return "_unknown"
-    cleaned = re.sub(r"[<>:\\\"/|?!*]", " ", value)
+    cleaned = (
+        value.replace("\u2018", "'")
+        .replace("\u2019", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+    )
+    cleaned = re.sub(r"[<>:\\\"/|?!*]", " ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip().lower()
     if not cleaned:
         return "_unknown"
@@ -216,18 +216,37 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         gen_py = Path(Path.home(), "AppData", "Local", "Temp", "gen_py")
         shutil.rmtree(gen_py, ignore_errors=True)
         xl_window = _start_excel()
+    current_workbook: list[Any | None] = [None]
+
+    def _cleanup() -> None:
+        workbook = current_workbook[0]
+        if workbook is not None:
+            try:
+                workbook.Close(SaveChanges=False)
+            except Exception:
+                pass
+        try:
+            xl_window.Quit()
+        except Exception:
+            pass
+
+    api.register_cleanup(_cleanup)
+
     converted: list[str] = []
     failures: list[str] = []
     try:
         # coversion is slow, emit every iteration
         workbook = None
         try:
+            api.check_cancel()
             workbook = xl_window.Workbooks.Open(str(target))
+            current_workbook[0] = workbook
             sheet_total = int(workbook.Worksheets.Count)
             output_dir = target.parent / "via_converted"
             output_dir.mkdir(parents=True, exist_ok=True)
             skip_show_types = {"digital", "podcast"}
             for sheet_index in range(1, sheet_total + 1):
+                api.check_cancel()
                 worksheet = workbook.Worksheets(sheet_index)
                 api.progress(current=sheet_index, total=sheet_total, unit="sheets")
                 show_type = _normalize_show_type(_extract_show_type(worksheet))
@@ -263,6 +282,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         finally:
             if workbook is not None:
                 workbook.Close(SaveChanges=False)
+            current_workbook[0] = None
     finally:
         xl_window.Quit()
 

@@ -48,6 +48,31 @@ _ARTICLE_MATCH_TRANSLATION = str.maketrans(
         "\u2019": "'",
     }
 )
+_WHITESPACE_CHAR_TRANSLATION = str.maketrans(
+    {
+        "\t": " ",
+        "\n": " ",
+        "\r": " ",
+        "\v": " ",
+        "\f": " ",
+        "\u00a0": " ",
+        "\u1680": " ",
+        "\u2000": " ",
+        "\u2001": " ",
+        "\u2002": " ",
+        "\u2003": " ",
+        "\u2004": " ",
+        "\u2005": " ",
+        "\u2006": " ",
+        "\u2007": " ",
+        "\u2008": " ",
+        "\u2009": " ",
+        "\u200a": " ",
+        "\u202f": " ",
+        "\u205f": " ",
+        "\u3000": " ",
+    }
+)
 
 
 @lru_cache(maxsize=1)
@@ -115,7 +140,7 @@ class FileOutcome:
 
 
 def _parse_name(raw: str) -> tuple[ParsedName | None, str | None]:
-    name = raw.strip()
+    name = raw.translate(_WHITESPACE_CHAR_TRANSLATION).strip()
     if not name:
         return None, "unrepairable_structure"
 
@@ -559,6 +584,7 @@ def _move_to_check(source: Path, check_dir: Path, target_name: str | None) -> Pa
 
 def _record_move(
     outcomes: list[FileOutcome],
+    moved_sources: set[Path],
     original_path: Path,
     current_path: Path,
     check_dir: Path,
@@ -573,20 +599,20 @@ def _record_move(
         outcome = FileOutcome("moved", original_path, None, f"other_error: {exc}")
     else:
         outcome = FileOutcome("moved", original_path, dest, reason)
+        moved_sources.add(original_path)
     outcomes.append(outcome)
     return outcome
 
 
-def _build_summary(outcomes: list[FileOutcome]) -> str:
+def _build_summary(outcomes: list[FileOutcome], moved_sources: set[Path]) -> str:
     valid = [out for out in outcomes if out.kind == "valid"]
     renamed = [out for out in outcomes if out.kind == "renamed"]
-    moved = [out for out in outcomes if out.kind == "moved"]
 
     return "\n".join(
         [
             f"\nValid: {len(valid)}",
             f"Renamed: {len(renamed)}",
-            f"_check/: {len(moved)}",
+            f"_check/: {len(moved_sources)}",
         ]
     )
 
@@ -632,6 +658,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     recursive = payload.get("recursive", False)
     outcomes: list[FileOutcome] = []
+    moved_sources: set[Path] = set()
 
     entries = collect_files(
         root,
@@ -657,7 +684,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         parsed, reason = _parse_name(stem)
         if not parsed:
             outcome = _record_move(
-                outcomes, path, path, check_dir, reason or "unrepairable_structure"
+                outcomes,
+                moved_sources,
+                path,
+                path,
+                check_dir,
+                reason or "unrepairable_structure",
             )
             api.log(
                 "info",
@@ -673,6 +705,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         if not normalized:
             outcome = _record_move(
                 outcomes,
+                moved_sources,
                 path,
                 path,
                 check_dir,
@@ -701,6 +734,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         if target.exists() and not same_file:
             existing = _record_move(
                 outcomes,
+                moved_sources,
                 target,
                 target,
                 check_dir,
@@ -716,6 +750,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             )
             outcome = _record_move(
                 outcomes,
+                moved_sources,
                 path,
                 path,
                 check_dir,
@@ -736,7 +771,14 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         try:
             destination = _safe_rename(path, target)
         except PermissionError:
-            outcome = _record_move(outcomes, path, path, check_dir, "permission_error")
+            outcome = _record_move(
+                outcomes,
+                moved_sources,
+                path,
+                path,
+                check_dir,
+                "permission_error",
+            )
             api.log(
                 "info",
                 (
@@ -748,7 +790,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             continue
         except OSError as exc:
             outcome = _record_move(
-                outcomes, path, path, check_dir, f"other_error: {exc}"
+                outcomes,
+                moved_sources,
+                path,
+                path,
+                check_dir,
+                f"other_error: {exc}",
             )
             api.log(
                 "info",
@@ -764,7 +811,14 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             collision = True
 
         if collision:
-            outcome = _record_move(outcomes, path, destination, check_dir, "collision")
+            outcome = _record_move(
+                outcomes,
+                moved_sources,
+                path,
+                destination,
+                check_dir,
+                "collision",
+            )
             api.log(
                 "info",
                 (
@@ -780,7 +834,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 (f"Renamed: {_rel(root, path)} -> {_rel(root, destination)}"),
             )
 
-    summary = _build_summary(outcomes)
+    summary = _build_summary(outcomes, moved_sources)
     if _GOOGLETRANS_IMPORT_ERROR:
         api.log("warn", "googletrans not available; article repositioning skipped.")
     api.emit_result({"_title": "Filename Normalization Finished", "Report": summary})

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from ferp.fscp.scripts import sdk
 from ferp.fscp.scripts.common import (
@@ -232,14 +232,31 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         gen_py = Path(Path.home(), "AppData", "Local", "Temp", "gen_py")
         shutil.rmtree(gen_py, ignore_errors=True)
         xl_window = _start_excel()
+    current_workbook: list[Any | None] = [None]
+
+    def _cleanup() -> None:
+        workbook = current_workbook[0]
+        if workbook is not None:
+            try:
+                workbook.Close(SaveChanges=False)
+            except Exception:
+                pass
+        try:
+            xl_window.Quit()
+        except Exception:
+            pass
+
+    api.register_cleanup(_cleanup)
     converted: list[str] = []
     failures: list[str] = []
     try:
         for index, file_path in enumerate(xl_files, start=1):
+            api.check_cancel()
             # coversion is slow, emit every iteration
             workbook = None
             try:
                 workbook = xl_window.Workbooks.Open(str(file_path))
+                current_workbook[0] = workbook
                 try:
                     worksheet = _select_worksheet(workbook, sheet_value)
                 except Exception:
@@ -264,6 +281,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             finally:
                 if workbook is not None:
                     workbook.Close(SaveChanges=False)
+                current_workbook[0] = None
     finally:
         xl_window.Quit()
 

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, TypedDict
 
+import pdfplumber
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
@@ -20,6 +21,7 @@ class QueryOptions(TypedDict):
     value: str
     recursive: bool
     case_sensitive: bool
+    table_mode: bool
 
 
 @dataclass(frozen=True)
@@ -301,6 +303,292 @@ def _write_xlsx(xlsx_path: Path, rows: list[dict[str, object]]) -> None:
     wb.save(xlsx_path)
 
 
+def _write_table_xlsx(
+    xlsx_path: Path,
+    rows: list[dict[str, object]],
+    row_details: list[dict[str, object]],
+) -> None:
+    headers = [
+        "file_name",
+        "relative_path",
+        "query",
+        "page_number",
+        "match_text",
+        "row_key",
+    ]
+    wb = Workbook()
+    ws = wb.active
+    if ws is None:
+        ws = wb.create_sheet()
+    ws.title = "Query Results"
+
+    header_font = Font(bold=True)
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    data_alignment = Alignment(vertical="center", wrap_text=True)
+    centered_alignment = Alignment(
+        horizontal="center", vertical="center", wrap_text=True
+    )
+
+    ws.append([header.replace("_", " ").title() for header in headers])
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.alignment = header_alignment
+
+    for row in rows:
+        ws.append([row.get(key, "") for key in headers])
+
+    last_row = max(1, len(rows) + 1)
+    last_col = len(headers)
+    table_ref = f"A1:{get_column_letter(last_col)}{last_row}"
+    table = Table(displayName="QueryResults", ref=table_ref)
+    table.tableStyleInfo = TableStyleInfo(
+        name="TableStyleLight1",
+        showFirstColumn=False,
+        showLastColumn=False,
+        showRowStripes=True,
+        showColumnStripes=False,
+    )
+    ws.add_table(table)
+
+    ws.column_dimensions["A"].width = 50
+    ws.column_dimensions["B"].width = 50
+    ws.column_dimensions["C"].width = 30
+    ws.column_dimensions["D"].auto_size = True
+    ws.column_dimensions["E"].width = 30
+    ws.column_dimensions["F"].width = 30
+
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            if cell.column in (4, 5):
+                cell.alignment = centered_alignment
+            else:
+                cell.alignment = data_alignment
+
+    row_sheet = wb.create_sheet("Row Data")
+    max_cells = 0
+    for detail in row_details:
+        cells = detail.get("row_cells", [])
+        if isinstance(cells, list):
+            max_cells = max(max_cells, len(cells))
+    row_headers = ["row_key"]
+    row_headers.extend([f"cell_{idx}" for idx in range(1, max_cells + 1)])
+    row_sheet.append([header.replace("_", " ").title() for header in row_headers])
+    for col_idx, header in enumerate(row_headers, start=1):
+        cell = row_sheet.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.alignment = header_alignment
+
+    for row in row_details:
+        cells_obj = row.get("row_cells", [])
+        cells = list(cells_obj) if isinstance(cells_obj, list) else []
+        row_sheet.append(
+            [
+                row.get("row_key", ""),
+                *cells,
+            ]
+        )
+
+    row_last_row = max(1, len(row_details) + 1)
+    row_last_col = len(row_headers)
+    row_table_ref = f"A1:{get_column_letter(row_last_col)}{row_last_row}"
+    row_table = Table(displayName="RowData", ref=row_table_ref)
+    row_table.tableStyleInfo = TableStyleInfo(
+        name="TableStyleLight1",
+        showFirstColumn=False,
+        showLastColumn=False,
+        showRowStripes=True,
+        showColumnStripes=False,
+    )
+    row_sheet.add_table(row_table)
+
+    row_sheet.column_dimensions["A"].width = 24
+    if max_cells:
+        row_sheet.column_dimensions[get_column_letter(1 + max_cells)].width = 40
+
+    for row in row_sheet.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = data_alignment
+
+    summary = wb.create_sheet("Summary")
+    summary_headers_query = ["query", "matches", "files_with_matches"]
+    summary_headers_file = ["relative_path", "matches", "queries_matched"]
+
+    query_counts: dict[str, int] = defaultdict(int)
+    query_files: dict[str, set[str]] = defaultdict(set)
+    file_counts: dict[str, int] = defaultdict(int)
+    file_queries: dict[str, set[str]] = defaultdict(set)
+
+    for row in rows:
+        query = str(row.get("query", ""))
+        relative_path = str(row.get("relative_path", ""))
+        query_counts[query] += 1
+        query_files[query].add(relative_path)
+        file_counts[relative_path] += 1
+        file_queries[relative_path].add(query)
+
+    summary.append(
+        [header.replace("_", " ").title() for header in summary_headers_query]
+    )
+    for col_idx, _ in enumerate(summary_headers_query, start=1):
+        cell = summary.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.alignment = header_alignment
+
+    for query in sorted(query_counts):
+        summary.append(
+            [
+                query,
+                query_counts[query],
+                len(query_files[query]),
+            ]
+        )
+
+    query_table_last_row = max(1, len(query_counts) + 1)
+    query_table_ref = f"A1:C{query_table_last_row}"
+    query_table = Table(displayName="QuerySummary", ref=query_table_ref)
+    query_table.tableStyleInfo = TableStyleInfo(
+        name="TableStyleLight1",
+        showFirstColumn=False,
+        showLastColumn=False,
+        showRowStripes=True,
+        showColumnStripes=False,
+    )
+    summary.add_table(query_table)
+
+    file_table_start = query_table_last_row + 2
+    summary.cell(
+        row=file_table_start,
+        column=1,
+        value=summary_headers_file[0].replace("_", " ").title(),
+    )
+    summary.cell(
+        row=file_table_start,
+        column=2,
+        value=summary_headers_file[1].replace("_", " ").title(),
+    )
+    summary.cell(
+        row=file_table_start,
+        column=3,
+        value=summary_headers_file[2].replace("_", " ").title(),
+    )
+    for col_idx in range(1, 4):
+        cell = summary.cell(row=file_table_start, column=col_idx)
+        cell.font = header_font
+        cell.alignment = header_alignment
+
+    for relative_path in sorted(file_counts):
+        summary.append(
+            [
+                relative_path,
+                file_counts[relative_path],
+                len(file_queries[relative_path]),
+            ]
+        )
+
+    file_table_last_row = file_table_start + len(file_counts)
+    file_table_ref = f"A{file_table_start}:C{file_table_last_row}"
+    file_table = Table(displayName="FileSummary", ref=file_table_ref)
+    file_table.tableStyleInfo = TableStyleInfo(
+        name="TableStyleLight1",
+        showFirstColumn=False,
+        showLastColumn=False,
+        showRowStripes=True,
+        showColumnStripes=False,
+    )
+    summary.add_table(file_table)
+
+    summary.column_dimensions["A"].width = 60
+    summary.column_dimensions["B"].width = 18
+    summary.column_dimensions["C"].width = 22
+    if query_table_last_row >= 2:
+        for row in summary.iter_rows(min_row=2, max_row=query_table_last_row):
+            for cell in row:
+                cell.alignment = data_alignment
+    if file_table_last_row > file_table_start:
+        for row in summary.iter_rows(
+            min_row=file_table_start + 1, max_row=file_table_last_row
+        ):
+            for cell in row:
+                cell.alignment = data_alignment
+
+    xlsx_path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(xlsx_path)
+
+
+def _normalize_table_cell(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value)
+    return " ".join(text.replace("\n", " ").split())
+
+
+def _process_pdf_table(
+    pdf_path: Path,
+    root: Path,
+    queries: list[QuerySpec],
+    api: sdk.ScriptAPI,
+    file_key: str,
+    check_cancel: Callable[[], None] | None = None,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    pdf_matches: list[dict[str, object]] = []
+    row_details: list[dict[str, object]] = []
+    relative_path = pdf_path.relative_to(root)
+    row_counter = 0
+
+    with pdfplumber.open(str(pdf_path)) as pdf:
+        for page_index, page in enumerate(pdf.pages, start=1):
+            if check_cancel is not None:
+                check_cancel()
+            try:
+                tables = page.extract_tables() or []
+            except Exception as exc:  # noqa: BLE001
+                api.log(
+                    "warn",
+                    f"Table extraction failed for '{pdf_path.name}' (page {page_index}): {exc}",
+                )
+                continue
+
+            for table_index, table in enumerate(tables, start=1):
+                for row_index, row in enumerate(table, start=1):
+                    if check_cancel is not None:
+                        check_cancel()
+                    normalized_cells = [_normalize_table_cell(cell) for cell in row]
+                    row_text = " | ".join(cell for cell in normalized_cells if cell)
+                    row_counter += 1
+                    row_key = f"{file_key}-{row_counter}"
+                    if not row_text:
+                        continue
+                    row_has_match = False
+                    for query in queries:
+                        for match in query.pattern.finditer(row_text):
+                            if check_cancel is not None:
+                                check_cancel()
+                            pdf_matches.append(
+                                {
+                                    "file_name": pdf_path.name,
+                                    "relative_path": str(relative_path),
+                                    "query": query.label,
+                                    "page_number": page_index,
+                                    "match_text": match.group(0),
+                                    "row_key": row_key,
+                                }
+                            )
+                            row_has_match = True
+                    if row_has_match:
+                        row_details.append(
+                            {
+                                "row_key": row_key,
+                                "row_cells": normalized_cells,
+                            }
+                        )
+
+    if not pdf_matches:
+        api.log("info", f"No matches found in {pdf_path.name}")
+
+    return pdf_matches, row_details
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     recursive_field: sdk.BoolField = {
@@ -321,6 +609,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "label": "Case sensitive",
                 "default": False,
             },
+            {
+                "id": "table_mode",
+                "type": "bool",
+                "label": "Table mode",
+                "default": False,
+            },
         ],
         text_input_style="multiline",
         payload_type=QueryOptions,
@@ -329,6 +623,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     raw_query = payload["value"]
     recursive = payload.get("recursive", False)
     case_sensitive = payload["case_sensitive"]
+    table_mode = payload["table_mode"]
 
     if not raw_query:
         api.emit_result(
@@ -341,11 +636,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         return
 
     context_chars = 80
-    context_response = api.request_input(
-        "Context characters around each match",
-        default=str(context_chars),
-        id="query_pdf_context",
-    )
+    context_response: str = ""
+    if not table_mode:
+        context_response = api.request_input(
+            "Context characters around each match",
+            default=str(context_chars),
+            id="query_pdf_context",
+        )
     if context_response:
         try:
             context_chars = int(context_response)
@@ -416,25 +713,38 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         "info",
         (
             f"Queries={len(queries)} | recursive={recursive} "
-            f"| case_sensitive={case_sensitive} | PDFs found={total_files}"
+            f"| case_sensitive={case_sensitive} | table_mode={table_mode} "
+            f"| PDFs found={total_files}"
         ),
     )
 
     matches: list[dict[str, object]] = []
     files_with_matches: set[Path] = set()
+    row_details: list[dict[str, object]] = []
 
     for index, pdf_path in enumerate(pdf_files, start=1):
         api.check_cancel()
         api.progress(current=index, total=total_files or 1, unit="files")
         try:
-            pdf_matches = _process_pdf(
-                pdf_path,
-                root_path,
-                queries,
-                context_chars,
-                api,
-                check_cancel=api.check_cancel,
-            )
+            if table_mode:
+                pdf_matches, pdf_rows = _process_pdf_table(
+                    pdf_path,
+                    root_path,
+                    queries,
+                    api,
+                    file_key=str(index),
+                    check_cancel=api.check_cancel,
+                )
+                row_details.extend(pdf_rows)
+            else:
+                pdf_matches = _process_pdf(
+                    pdf_path,
+                    root_path,
+                    queries,
+                    context_chars,
+                    api,
+                    check_cancel=api.check_cancel,
+                )
         except Exception as exc:  # noqa: BLE001
             api.log("warn", f"Failed to process '{pdf_path}': {exc}")
             continue
@@ -449,8 +759,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         output_dir = (
             target_path.parent if ctx.target_kind == "file" else root_path.parent
         )
-        xlsx_path = output_dir / f"{stem}_query_results.xlsx"
-        _write_xlsx(xlsx_path, matches)
+        if table_mode:
+            xlsx_path = output_dir / f"{stem}_query_table_results.xlsx"
+            _write_table_xlsx(xlsx_path, matches, row_details)
+        else:
+            xlsx_path = output_dir / f"{stem}_query_results.xlsx"
+            _write_xlsx(xlsx_path, matches)
 
     api.emit_result(
         {

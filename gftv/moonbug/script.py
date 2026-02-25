@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path
-from typing import NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from ferp.fscp.scripts import sdk
 from ferp.fscp.scripts.common import (
@@ -228,6 +228,21 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         gen_py = Path(Path.home(), "AppData", "Local", "Temp", "gen_py")
         shutil.rmtree(gen_py, ignore_errors=True)
         xl_window = _start_excel()
+    current_workbook: list[Any | None] = [None]
+
+    def _cleanup() -> None:
+        workbook = current_workbook[0]
+        if workbook is not None:
+            try:
+                workbook.Close(SaveChanges=False)
+            except Exception:
+                pass
+        try:
+            xl_window.Quit()
+        except Exception:
+            pass
+
+    api.register_cleanup(_cleanup)
 
     base_name_map_by_dir: dict[Path, dict[str, Path | None]] = {}
     moved_to_check: set[Path] = set()
@@ -236,6 +251,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     failures: list[str] = []
     try:
         for index, file in enumerate(xl_files, start=1):
+            api.check_cancel()
             # conversion is slow, emit every iteration
             workbook = None
             destination = None
@@ -250,6 +266,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             base_name_map = base_name_map_by_dir.setdefault(parent_dir, {})
             try:
                 workbook = xl_window.Workbooks.Open(str(file), UpdateLinks=0)
+                current_workbook[0] = workbook
                 worksheet = workbook.Worksheets(1)
                 print_area = _get_print_area(worksheet)
                 _page_setup(worksheet, print_area, autofit_column)
@@ -280,6 +297,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             finally:
                 if workbook is not None:
                     workbook.Close(SaveChanges=False)
+                current_workbook[0] = None
             if base_name and destination:
                 if is_none_vrsn:
                     if destination.exists():

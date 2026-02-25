@@ -20,7 +20,8 @@ producing an XLSX summary of all matches.
 4. Optional settings (configure in the prompt):
    - Recursive to scan directories sub folders.
    - Case sensitive for case-sensitive matches.
-   - Context chars to adjust the context snippet (default 80).
+   - Table mode to extract and search table rows.
+   - Context chars to adjust the context snippet (default 80, ignored in table mode).
 
 ## Behavior
 
@@ -32,10 +33,15 @@ producing an XLSX summary of all matches.
 - Writes deterministic XLSX results (including a Summary sheet) to the directory
   containing the target, e.g. `<dir_name>_query_results.xlsx` or
   `<file_name>_query_results.xlsx`.
+ - In table mode, writes `<name>_query_table_results.xlsx` with:
+   - `Query Results`: match rows without context, plus a `row_key`.
+   - `Row Data`: the normalized table rows keyed by `row_key`.
+   - `Summary`: same summary layout as text mode.
 
 ## Notes
 
 - Scanned PDFs without text won’t yield results unless OCR is performed beforehand.
+- Table mode depends on detectable tables; PDFs without extractable tables may yield no results.
 - Invalid regex patterns abort the run with an error message.
 - Extraction failures or individual file issues are logged but do not abort the
   entire search.
