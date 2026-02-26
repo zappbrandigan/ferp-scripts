@@ -2979,6 +2979,8 @@ def _add_stamp_annotation(
     appearance_ref = writer._add_object(appearance)
 
     annot = DictionaryObject()
+    now_utc = datetime.now(timezone.utc)
+    pdf_date = now_utc.strftime("D:%Y%m%d%H%M%SZ")
     annot.update(
         {
             NameObject("/Type"): NameObject("/Annot"),
@@ -2998,6 +3000,7 @@ def _add_stamp_annotation(
             NameObject("/F"): NumberObject(4),
             NameObject("/T"): TextStringObject(USER_NAME),
             NameObject("/NM"): TextStringObject(stamp_name),
+            NameObject("/M"): TextStringObject(pdf_date),
         }
     )
     annot_ref = writer._add_object(annot)
