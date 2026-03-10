@@ -7,7 +7,7 @@ from typing import NotRequired, TypedDict
 from ferp.fscp.scripts import sdk
 from ferp.fscp.scripts.common import collect_files, move_to_dir
 
-_DOCX_PATTERN = "*.docx"
+_WORD_PATTERNS = ("*.doc", "*.docx")
 _OG_DIRNAME = "_og"
 _WORD_PDF_FORMAT = 17
 
@@ -32,6 +32,29 @@ def _export_pdf(document, out_file: Path) -> None:
     document.ExportAsFixedFormat(str(out_file), _WORD_PDF_FORMAT)
 
 
+def _collect_word_files(
+    target_path: Path,
+    *,
+    recursive: bool,
+    check_cancel,
+) -> list[Path]:
+    if target_path.is_file():
+        if target_path.suffix.lower() in {".doc", ".docx"}:
+            return [target_path]
+        return []
+
+    files: dict[Path, None] = {}
+    for pattern in _WORD_PATTERNS:
+        for path in collect_files(
+            target_path,
+            pattern,
+            recursive=recursive,
+            check_cancel=check_cancel,
+        ):
+            files[path] = None
+    return sorted(files)
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     target_path = Path(ctx.target_path)
@@ -54,8 +77,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         recursive = payload.get("recursive", False)
     else:
         confirm = api.confirm(
-            "This will convert the selected file(s) to PDF and move the .docx "
-            "files into an '_og' folder. Continue?",
+            "This will convert the selected Word file(s) to PDF and move the "
+            "original .doc/.docx files into an '_og' folder. Continue?",
             id="convert_word_confirm",
         )
         if not confirm:
@@ -63,13 +86,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             return
         recursive = False
 
-    docx_files = collect_files(
+    word_files = _collect_word_files(
         target_path,
-        _DOCX_PATTERN,
         recursive=recursive,
         check_cancel=api.check_cancel,
     )
-    total_files = len(docx_files)
+    total_files = len(word_files)
 
     if ctx.environment["host"]["platform"] != "win32":
         api.log(
@@ -112,7 +134,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     failures: list[str] = []
 
     try:
-        for index, file in enumerate(docx_files, start=1):
+        for index, file in enumerate(word_files, start=1):
             api.check_cancel()
             document = None
             destination = file.with_suffix(".pdf")
