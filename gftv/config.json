@@ -1,5 +1,5 @@
 {
-  "version": "1.3.1",
+  "version": "1.3.2",
   "scripts": [
     {
       "id": "gftv.extractor",
@@ -126,7 +126,7 @@
     {
       "id": "gftv.convert_word",
       "name": "Convert: Word to PDF",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "script": "scripts/gftv/convert_word/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
