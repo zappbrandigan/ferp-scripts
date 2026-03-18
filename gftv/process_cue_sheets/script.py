@@ -3579,8 +3579,13 @@ def make_top_space_first_page_inplace(
             writer.add_page(src_page)
             continue
 
+        rotation = int(src_page.get("/Rotate", 0) or 0) % 360
+        page_for_layout = (
+            normalize_page_rotation(src_page, writer) if rotation else src_page
+        )
+
         # Use MediaBox for physical page size
-        box = src_page.mediabox
+        box = page_for_layout.mediabox
         width = float(box.width)
         height = float(box.height)
 
@@ -3589,23 +3594,23 @@ def make_top_space_first_page_inplace(
         dy = (1.0 - scale_value) * height - top_space
 
         dst_page = PageObject.create_blank_page(pdf=writer, width=width, height=height)
-        if src_page.cropbox:
-            dst_page.cropbox = src_page.cropbox
-        if getattr(src_page, "bleedbox", None):
-            dst_page.bleedbox = src_page.bleedbox
-        if getattr(src_page, "trimbox", None):
-            dst_page.trimbox = src_page.trimbox
-        if getattr(src_page, "artbox", None):
-            dst_page.artbox = src_page.artbox
+        if page_for_layout.cropbox:
+            dst_page.cropbox = page_for_layout.cropbox
+        if getattr(page_for_layout, "bleedbox", None):
+            dst_page.bleedbox = page_for_layout.bleedbox
+        if getattr(page_for_layout, "trimbox", None):
+            dst_page.trimbox = page_for_layout.trimbox
+        if getattr(page_for_layout, "artbox", None):
+            dst_page.artbox = page_for_layout.artbox
         transform = Transformation().scale(scale_value, scale_value).translate(dx, dy)
         merge_transformed = getattr(dst_page, "merge_transformed_page", None)
         if callable(merge_transformed):
-            merge_transformed(src_page, transform)
+            merge_transformed(page_for_layout, transform)
         else:
-            add_transformation = getattr(src_page, "add_transformation", None)
+            add_transformation = getattr(page_for_layout, "add_transformation", None)
             if callable(add_transformation):
                 add_transformation(transform)
-            dst_page.merge_page(src_page)
+            dst_page.merge_page(page_for_layout)
         writer.add_page(dst_page)
 
     # ---- Copy Document Info metadata ----
