@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 from typing import Any, NotRequired, TypedDict
@@ -16,6 +17,7 @@ class UserResponse(TypedDict):
     autofitcolumn: bool
     autofitrows: bool
     portrait: bool
+    all_tabs: bool
     recursive: NotRequired[bool]
 
 
@@ -123,6 +125,12 @@ def _select_worksheet(workbook, sheet_value: str | None):
     return workbook.Worksheets(sheet_value)
 
 
+def _sanitize_filename_component(value: str) -> str:
+    cleaned = re.sub(r'[\\/:*?"<>|]+', " ", str(value)).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.rstrip(". ") or "Sheet"
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     confirm = api.confirm(
@@ -169,6 +177,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "label": "Portrait orientation",
                 "default": False,
             },
+            {
+                "id": "all_tabs",
+                "type": "bool",
+                "label": "Convert all tabs",
+                "default": False,
+            },
         ],
         show_text_input=True,
         text_input_style="single_line",
@@ -179,6 +193,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     autofit_colulmn = payload["autofitcolumn"]
     autofit_rows = payload["autofitrows"]
     portrait = payload["portrait"]
+    all_tabs = payload["all_tabs"]
     sheet_value = payload.get("value", "").strip()
 
     target = ctx.target_path
@@ -202,6 +217,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "Dry Run": True,
                 "Target": str(target),
                 "Recursive": recursive,
+                "All Tabs": all_tabs,
                 "Files Found": total_files,
             }
         )
@@ -249,6 +265,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     api.register_cleanup(_cleanup)
     converted: list[str] = []
     failures: list[str] = []
+    exported_count = 0
     try:
         for index, file_path in enumerate(xl_files, start=1):
             api.check_cancel()
@@ -257,23 +274,37 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             try:
                 workbook = xl_window.Workbooks.Open(str(file_path))
                 current_workbook[0] = workbook
-                try:
-                    worksheet = _select_worksheet(workbook, sheet_value)
-                except Exception:
-                    raise RuntimeError(
-                        f"Worksheet not found for '{sheet_value or 'active sheet'}'."
+                worksheets = []
+                if all_tabs:
+                    worksheets = list(workbook.Worksheets)
+                    if not worksheets:
+                        raise RuntimeError("Workbook has no worksheets to export.")
+                else:
+                    try:
+                        worksheets = [_select_worksheet(workbook, sheet_value)]
+                    except Exception:
+                        raise RuntimeError(
+                            f"Worksheet not found for '{sheet_value or 'active sheet'}'."
+                        )
+
+                for worksheet in worksheets:
+                    api.check_cancel()
+                    print_area = _get_print_area(worksheet)
+                    _page_setup(
+                        worksheet,
+                        print_area,
+                        autofit_colulmn,
+                        autofit_rows,
+                        portrait,
                     )
-                print_area = _get_print_area(worksheet)
-                _page_setup(
-                    worksheet,
-                    print_area,
-                    autofit_colulmn,
-                    autofit_rows,
-                    portrait,
-                )
-                out_path = build_destination(file_path.parent, file_path.stem, ".pdf")
-                worksheet.ExportAsFixedFormat(0, str(out_path))
-                converted.append(str(out_path))
+                    base_name = file_path.stem
+                    if all_tabs:
+                        sheet_name = _sanitize_filename_component(worksheet.Name)
+                        base_name = f"{base_name} - {sheet_name}"
+                    out_path = build_destination(file_path.parent, base_name, ".pdf")
+                    worksheet.ExportAsFixedFormat(0, str(out_path))
+                    converted.append(str(out_path))
+                    exported_count += 1
                 api.progress(current=index, total=total_files, unit="files")
             except Exception as exc:
                 api.log("warn", f"Failed to process '{file_path}': {exc}")
@@ -289,7 +320,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         {
             "_title": "Excel Conversion Summary",
             "Failures": failures,
-            "Converted": f"{len(converted)} files",
+            "Converted": f"{exported_count} PDFs",
         }
     )
 

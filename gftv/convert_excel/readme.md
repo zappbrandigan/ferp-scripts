@@ -18,11 +18,14 @@ Converts Excel workbooks to PDF using the local Excel application.
    - `Portrait orientation` to switch layout from the default landscape orientation.
    - `Autofit columns` to autofit column widths (off by default).
    - `Autofit rows` to autofit row heights (off by default).
+   - `Convert all tabs` to export one PDF per worksheet in the workbook.
+   - Optional text input to target a specific sheet by name or 1-based index when `Convert all tabs` is off.
 
 ## Behavior
 
 - Finds `*.xls*` files in the target directory (optionally recursive).
-- Exports each workbook as a PDF next to the source file.
+- Exports the active sheet by default, or a specific sheet when provided in the text input.
+- When `Convert all tabs` is enabled, exports every worksheet as its own PDF named `<workbook> - <sheet>.pdf`.
 - Adds a numeric suffix if a PDF with the same name already exists.
 - Reports failures while continuing the batch.
 
