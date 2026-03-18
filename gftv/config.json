@@ -1,5 +1,5 @@
 {
-  "version": "1.3.3",
+  "version": "1.3.4",
   "scripts": [
     {
       "id": "gftv.extractor",
@@ -108,7 +108,7 @@
     {
       "id": "gftv.convert_excel",
       "name": "Convert: Excel to PDF",
-      "version": "1.1.2",
+      "version": "1.1.3",
       "script": "scripts/gftv/convert_excel/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
