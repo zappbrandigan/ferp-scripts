@@ -1,6 +1,18 @@
 {
-  "version": "1.3.4",
+  "version": "1.3.5",
   "scripts": [
+    {
+      "id": "gftv.report_cue_sheet_directory",
+      "name": "Report: Cue Sheet Directory",
+      "version": "1.0.0",
+      "script": "scripts/gftv/report_cue_sheet_directory/script.py",
+      "dependencies": [
+        "openpyxl>=3.1"
+      ],
+      "target": [
+        "highlighted_directory"
+      ]
+    },
     {
       "id": "gftv.extractor",
       "name": "Extract: Email Attachments",
