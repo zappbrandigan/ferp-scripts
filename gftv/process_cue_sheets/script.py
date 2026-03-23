@@ -2102,6 +2102,12 @@ def filter_logos(cues: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
             "BV / L",
             "OT / L",
             "CT / L",
+            "BI / LG",
+            "VV / LG",
+            "VI / LG",
+            "BV / LG",
+            "OT / LG",
+            "CT / LG",
         ]
         if usage in logo_usages or LOGO_RE.search(usage) or LOGO_RE.search(title):
             continue
