@@ -1806,7 +1806,7 @@ def parse_fox_sports(
 # =================================================
 
 VIA_HEADER_RE = re.compile(
-    r"\s*#?\s*Musical\s*Performer\(s\)\s*Writer\(s\)\s*Publisher\(s\)?\s*\/\s*Time\s*In \s*\/\s*Time\s*Use\s*Type",
+    r"\s*#?\s*Musical\s*Performer\(s\)\s*Writer\(s\)\s*Publisher\(s\)?\s*(?:\s\/\sCopyright)?\s*\/\s*Time\s*In \s*\/\s*Time\s*Use\s*Type",
     re.IGNORECASE,
 )
 
