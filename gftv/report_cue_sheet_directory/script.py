@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,12 +15,69 @@ from ferp.fscp.scripts.common import build_destination
 
 @dataclass(frozen=True)
 class CueSheetRow:
-    date_range: str
-    territory_code: str
+    deal: str
+    catalog: str
+    pd_code: str
+    film_or_series: str
     revision_status: str
-    media_type: str
-    catalog_code: str
-    cue_sheet_pdf: str
+    production_title: str
+    episode_title: str
+    season_number: str
+    episode_number: str
+    territory_code: str
+    territory: str
+
+
+_PRODUCTION_DELIM = "   "
+_EPISODE_DELIM = "  "
+_DATEISH_EPISODE_NUMBER_RE = re.compile(
+    r"^\d{6,8}(?:-\d+[A-Za-z]?)?$|^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$"
+)
+_EPISODE_CODE_RE = re.compile(r"^\d{4,5}$")
+
+
+def _parse_series_title_fields(stem: str) -> tuple[str, str, str, str]:
+    if _PRODUCTION_DELIM not in stem:
+        return stem, "", "", ""
+
+    production_title, remainder = stem.split(_PRODUCTION_DELIM, 1)
+    production_title = production_title.strip()
+    remainder = remainder.strip()
+    if not remainder or "Ep No." not in remainder:
+        return production_title, "", "", ""
+
+    episode_title = ""
+    episode_info = remainder
+    if _EPISODE_DELIM in remainder:
+        possible_episode_title, possible_episode_info = remainder.rsplit(_EPISODE_DELIM, 1)
+        if "Ep No." in possible_episode_info:
+            episode_title = possible_episode_title.strip()
+            episode_info = possible_episode_info.strip()
+
+    episode_info = episode_info.strip()
+    if "Ep No." not in episode_info:
+        return production_title, episode_title, "", ""
+
+    _, episode_number = episode_info.split("Ep No.", 1)
+    episode_number = episode_number.strip()
+    if not episode_number or _DATEISH_EPISODE_NUMBER_RE.fullmatch(episode_number):
+        return production_title, episode_title, "", ""
+
+    season_number = ""
+    if _EPISODE_CODE_RE.fullmatch(episode_number):
+        if len(episode_number) == 4:
+            season_number = episode_number[0]
+        else:
+            season_number = episode_number[:2]
+        episode_number = str(int(episode_number[-3:]))
+
+    return production_title, episode_title, season_number, episode_number
+
+
+def _parse_title_fields(stem: str, media_type: str) -> tuple[str, str, str, str]:
+    if media_type == "film":
+        return stem, "", "", ""
+    return _parse_series_title_fields(stem)
 
 
 def _parse_cue_sheet_path(pdf_path: Path, root: Path) -> CueSheetRow | None:
@@ -28,39 +86,56 @@ def _parse_cue_sheet_path(pdf_path: Path, root: Path) -> CueSheetRow | None:
         return None
 
     filename = relative_parts[-1]
-    catalog_code = relative_parts[-2]
+    catalog_folder = relative_parts[-2]
     media_type = relative_parts[-3].lower()
     territory_code = relative_parts[-4]
 
     if media_type not in {"film", "tv"}:
         return None
 
-    if len(relative_parts) == 4:
-        date_range = root.name
-        revision_status = "New"
-    elif len(relative_parts) >= 5 and relative_parts[-5] == "_REV":
+    if len(relative_parts) >= 5 and relative_parts[-5] == "_REV":
         date_range = root.name if len(relative_parts) == 5 else relative_parts[-6]
         revision_status = "Revision"
+    elif len(relative_parts) == 4:
+        date_range = root.name
+        revision_status = "New"
     else:
         date_range = relative_parts[-5]
         revision_status = "New"
 
     if not date_range or date_range == "_REV":
         return None
-    if not territory_code:
+    if not catalog_folder:
         return None
-    if not catalog_code:
+    if not territory_code:
         return None
     if not filename.lower().endswith(".pdf"):
         return None
 
+    if " - " in catalog_folder:
+        catalog, deal = catalog_folder.split(" - ", 1)
+    else:
+        catalog = catalog_folder
+        deal = ""
+
+    film_or_series = "Film" if media_type == "film" else "Series"
+    title_stem = Path(filename).stem
+    production_title, episode_title, season_number, episode_number = (
+        _parse_title_fields(title_stem, media_type)
+    )
+
     return CueSheetRow(
-        date_range=date_range,
-        territory_code=territory_code,
+        deal=deal,
+        catalog=catalog,
+        pd_code="",
+        film_or_series=film_or_series,
         revision_status=revision_status,
-        media_type=media_type,
-        catalog_code=catalog_code,
-        cue_sheet_pdf=filename,
+        production_title=production_title,
+        episode_title=episode_title,
+        season_number=season_number,
+        episode_number=episode_number,
+        territory_code=territory_code,
+        territory="",
     )
 
 
@@ -77,12 +152,17 @@ def _write_report(xlsx_path: Path, rows: list[CueSheetRow]) -> None:
     xlsx_path.parent.mkdir(parents=True, exist_ok=True)
 
     headers = [
-        "Date Range",
-        "Territory Code",
+        "Deal",
+        "Catalog",
+        "PD Code",
+        "Film or Series",
         "Revision Status",
-        "Film or TV",
-        "Catalog Code",
-        "Cue Sheet",
+        "Production Title",
+        "Episode Title",
+        "Season Number",
+        "Episode Number",
+        "Territory Code",
+        "Territory",
     ]
 
     wb = Workbook()
@@ -105,12 +185,17 @@ def _write_report(xlsx_path: Path, rows: list[CueSheetRow]) -> None:
     for row in rows:
         ws.append(
             [
-                row.date_range,
-                row.territory_code,
+                row.deal,
+                row.catalog,
+                row.pd_code,
+                row.film_or_series,
                 row.revision_status,
-                row.media_type,
-                row.catalog_code,
-                row.cue_sheet_pdf,
+                row.production_title,
+                row.episode_title,
+                row.season_number,
+                row.episode_number,
+                row.territory_code,
+                row.territory,
             ]
         )
 
@@ -129,12 +214,17 @@ def _write_report(xlsx_path: Path, rows: list[CueSheetRow]) -> None:
         ws.add_table(table)
 
     column_widths = {
-        "A": 22,
+        "A": 40,
         "B": 18,
         "C": 18,
-        "D": 12,
-        "E": 20,
-        "F": 48,
+        "D": 16,
+        "E": 18,
+        "F": 40,
+        "G": 32,
+        "H": 16,
+        "I": 20,
+        "J": 18,
+        "K": 18,
     }
     for column, width in column_widths.items():
         ws.column_dimensions[column].width = width
@@ -187,12 +277,17 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     rows.sort(
         key=lambda row: (
-            row.date_range.lower(),
-            row.territory_code.lower(),
+            row.deal.lower(),
+            row.catalog.lower(),
+            row.pd_code.lower(),
+            row.film_or_series.lower(),
             row.revision_status.lower(),
-            row.media_type.lower(),
-            row.catalog_code.lower(),
-            row.cue_sheet_pdf.lower(),
+            row.production_title.lower(),
+            row.episode_title.lower(),
+            row.season_number.lower(),
+            row.episode_number.lower(),
+            row.territory_code.lower(),
+            row.territory.lower(),
         )
     )
 
