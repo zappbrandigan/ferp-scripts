@@ -1266,8 +1266,48 @@ RC_CUE_HEADER_RE = re.compile(
 # Role line start (after descriptor peeling)
 RC_ROLE_START_RE = re.compile(r"^(C|A|CA|AR|E|AM)\s+(.+)$")
 
-# Extract society + percent from END of role block
-RC_SOCIETY_PERCENT_RE = re.compile(r"(.*?)\s+([A-Z]+)\s+(\d+(?:\.\d+)?)$")
+RC_PERCENT_RE = re.compile(r"^\d+(?:\.\d+)?$")
+
+
+def _load_known_societies() -> set[str]:
+    default_societies = {
+        "ASCAP",
+        "BMI",
+        "SESAC",
+        "SOCAN",
+        "PRS",
+        "MCPS",
+        "GMR",
+        "APRA",
+        "GEMA",
+        "SGAE",
+        "SIAE",
+        "NS",
+        "UI",
+    }
+    path = Path(__file__).resolve().parent / "assets" / "societies.json"
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return default_societies
+
+    if not isinstance(payload, dict):
+        return default_societies
+
+    raw_societies = payload.get("societies")
+    if not isinstance(raw_societies, list):
+        return default_societies
+
+    societies = {
+        str(item).strip().upper()
+        for item in raw_societies
+        if isinstance(item, str) and item.strip()
+    }
+    return societies or default_societies
+
+
+RC_KNOWN_SOCIETIES = _load_known_societies()
 
 # Known RapidCue descriptor prefixes
 RC_DESCRIPTOR_TERMS = {
@@ -1392,6 +1432,35 @@ def rc_peel_descriptor_prefix(line: str) -> Tuple[Optional[str], str]:
     return None, stripped
 
 
+def rc_parse_role_tail(text: str) -> Tuple[str, Optional[str], Optional[str]]:
+    """
+    Parse a RapidCue role payload into (name, society, percent).
+
+    RapidCue commonly ends role lines with:
+      - "<name> <society> <percent>"
+      - "<name> <society>"
+
+    When percent is omitted, we only peel the trailing token into "society"
+    if it matches a known affiliation code. That avoids treating arbitrary
+    uppercase words in a company name as a society.
+    """
+    tokens = text.split()
+    if not tokens:
+        return "", None, None
+
+    percent: Optional[str] = None
+    society: Optional[str] = None
+
+    if RC_PERCENT_RE.fullmatch(tokens[-1]):
+        percent = tokens.pop()
+
+    if tokens and tokens[-1].upper() in RC_KNOWN_SOCIETIES:
+        society = tokens.pop().upper()
+
+    name = " ".join(tokens).strip()
+    return name, society, percent
+
+
 def parse_rapidcue(
     pdf,
     log_fn: Optional[Callable[[str], None]] = None,
@@ -1417,15 +1486,7 @@ def parse_rapidcue(
             return
 
         text = " ".join(role_buffer).strip()
-        m = RC_SOCIETY_PERCENT_RE.search(text)
-        if m:
-            name = m.group(1).strip()
-            society = m.group(2)
-            percent = m.group(3)
-        else:
-            name = text
-            society = None
-            percent = None
+        name, society, percent = rc_parse_role_tail(text)
 
         entry = {"name": name, "society": society, "percent": percent}
 
