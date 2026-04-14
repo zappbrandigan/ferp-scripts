@@ -329,7 +329,7 @@ def parse_soundmouse(
             usage = compact.get("usage")
             duration = compact.get("duration")
             # New cue boundary: cue # present
-            if cue_no:
+            if cue_no and cue_no.strip() != "#":
                 flush_current()
                 current_cue = {
                     "cue": cue_no,
@@ -369,7 +369,7 @@ def parse_soundmouse(
                 elif r == "E":
                     last_seen_role = r
                     current_cue["publishers"].append(entry)
-                elif r == "AM":
+                elif r in ["AM", "PF"]:
                     last_seen_role = r
                 else:
                     # Handle text line wrape with no role by using last seen role in this cue
@@ -381,7 +381,7 @@ def parse_soundmouse(
                     elif last_seen_role == "E":
                         current_cue["publishers"][-1]["name"] += " " + name
 
-        flush_current()
+    flush_current()
 
     if log_fn:
         log_fn(
