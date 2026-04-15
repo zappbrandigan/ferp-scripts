@@ -125,9 +125,10 @@ def _escape_file_name(file_name):
     return re.sub(r"[<>:\\\"/|?!*]", "", file_name)
 
 
-def _export_pdf(workbook, out_file):
-    """Export Excel workbook to pdf."""
-    workbook.ExportAsFixedFormat(0, str(out_file))
+def _export_pdf(worksheet, out_file):
+    """Export Excel worksheet to pdf."""
+    # ExportAsFixedFormat is a method on the worksheet, not the workbook.
+    worksheet.ExportAsFixedFormat(0, str(out_file))
 
 
 def _is_in_named_dir(path: Path, dir_name: str) -> bool:
@@ -281,7 +282,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     ".pdf",
                     force_suffix=collision,
                 )
-                _export_pdf(workbook, destination)
+                _export_pdf(worksheet, destination)
                 converted.append(str(destination))
                 api.progress(
                     current=index,
