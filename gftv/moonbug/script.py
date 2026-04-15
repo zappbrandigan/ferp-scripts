@@ -29,31 +29,63 @@ def _start_excel():
     return xl_obj
 
 
-def _get_print_area(worksheet):
-    """Find last column and last row containing data to determine print area."""
-    from win32com import client  # type: ignore
+def _get_print_area(worksheet, include_formulas=False):
+    """
+    Determine print area as A1:<last_col><last_row>, using Excel's Find("*") approach.
+    Works for .xls/.xlsx via COM.
 
-    column_letters = [chr(x) for x in range(65, 91)]
-    col_last_row = {}
+    include_formulas:
+        False -> LookIn=xlValues (what user sees)
+        True  -> LookIn=xlFormulas (treat formula cells as used even if result is "")
+    """
+    xl_values = -4163
+    xl_formulas = -4123
+    xl_by_rows = 1
+    xl_by_columns = 2
+    xl_previous = 2
+    xl_part = 2
 
-    for letter in column_letters:
-        try:
-            col_last_row[letter] = (
-                worksheet.Cells(worksheet.Rows.Count, letter)
-                .End(client.constants.xlShiftUp)
-                .Row
-            )
-        except Exception:
-            col_last_row[letter] = 1
+    look_in = xl_formulas if include_formulas else xl_values
+    after = worksheet.Cells(1, 1)
 
-    columns_with_data = [k for k, v in col_last_row.items() if v > 1]
-    if not columns_with_data:
-        return "A1"
+    common_kwargs = dict(
+        What="*",
+        After=after,
+        LookIn=look_in,
+        LookAt=xl_part,
+        MatchCase=False,
+        SearchFormat=False,
+    )
 
-    last_row = max(col_last_row.values())
-    last_column = max(columns_with_data)
+    last_row_cell = worksheet.Cells.Find(
+        SearchOrder=xl_by_rows,
+        SearchDirection=xl_previous,
+        **common_kwargs,
+    )
+    last_col_cell = worksheet.Cells.Find(
+        SearchOrder=xl_by_columns,
+        SearchDirection=xl_previous,
+        **common_kwargs,
+    )
 
-    return f"A1:{last_column}{last_row}"
+    if last_row_cell is None or last_col_cell is None:
+        return "A1:A1"
+
+    last_row = int(last_row_cell.Row)
+    last_col = int(last_col_cell.Column)
+    last_col_letter = _column_letter(last_col)
+    return f"A1:{last_col_letter}{last_row}"
+
+
+def _column_letter(index: int) -> str:
+    """Convert 1-based column index to Excel column letters."""
+    if index < 1:
+        return "A"
+    letters: list[str] = []
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters.append(chr(65 + remainder))
+    return "".join(reversed(letters))
 
 
 def _page_setup(worksheet, print_area, autocolumn):
