@@ -1899,21 +1899,45 @@ def parse_via(
     pages_scanned = 0
     pages_with_tables = 0
     rows_total = 0
-    header_map = {
-        "cue_no": 0,
-        "title": 1,
-        "usage": 6,
-        "composers": 3,
-        "publishers": 4,
-    }
+    header_map: dict[str, int] | None = None
     skipped_pub_count = 0
     SKIP_PUB = re.compile(r"extreme\smusic\slibrary", re.IGNORECASE)
+    required_headers = {"cue_no", "title", "composers", "publishers", "usage"}
 
     def clean(value):
         if not value:
             return ""
         return str(value).replace("\n", " ").replace("/", " ").strip()
 
+    def normalize_header_cell(value: Any) -> str:
+        text = str(value or "").lower()
+        return re.sub(r"[^a-z0-9#]+", " ", text).strip()
+
+    def detect_via_header_map(row: Sequence[Any]) -> dict[str, int]:
+        detected: dict[str, int] = {}
+        for idx, cell in enumerate(row):
+            text = normalize_header_cell(cell)
+            if not text:
+                continue
+            if text == "#" or text.startswith("# "):
+                detected["cue_no"] = idx
+            elif "musical" in text:
+                detected["title"] = idx
+            elif "writer" in text:
+                detected["composers"] = idx
+            elif "publisher" in text:
+                detected["publishers"] = idx
+            elif "use type" in text or text.startswith("use") or text == "use type":
+                detected["usage"] = idx
+        return detected
+
+    header_map = {}
+    detected = detect_via_header_map(pdf.pages[0].extract_table()[0])
+    if required_headers.issubset(detected):
+        header_map = detected
+    elif log_fn:
+        missing = ", ".join(sorted(required_headers - set(detected)))
+        log_fn(f"via parser: incomplete header_map, missing={missing}")
     for page in pdf.pages:
         if check_cancel is not None:
             check_cancel()
@@ -1923,9 +1947,6 @@ def parse_via(
         for row in table:
             rows_total += 1
             row = (row + [""] * 10)[:10]
-            header_text = " ".join([str(cell or "") for cell in row[:10]])
-            if VIA_HEADER_RE.search(header_text):
-                continue
             publishers = clean(row[header_map["publishers"]])
             if SKIP_PUB.search(publishers):
                 skipped_pub_count += 1
