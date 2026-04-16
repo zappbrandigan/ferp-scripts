@@ -3640,6 +3640,33 @@ def resolve_publisher_fields_raw(
     return effective_date, territory
 
 
+def partition_publishers_by_stamp_status(
+    matched_publishers: list[str],
+    category_entries: list[dict],
+) -> tuple[list[str], list[str]]:
+    stampable_publishers: list[str] = []
+    do_not_stamp_publishers: list[str] = []
+    matched_set = {p.strip() for p in matched_publishers if p.strip()}
+    seen_stampable: set[str] = set()
+    seen_do_not_stamp: set[str] = set()
+
+    for entry in category_entries:
+        publisher = str(entry.get("publisher", "")).strip()
+        if publisher not in matched_set:
+            continue
+        status = str(entry.get("status", "")).strip()
+        if status == "Active: Do Not Stamp":
+            if publisher not in seen_do_not_stamp:
+                do_not_stamp_publishers.append(publisher)
+                seen_do_not_stamp.add(publisher)
+            continue
+        if publisher not in seen_stampable:
+            stampable_publishers.append(publisher)
+            seen_stampable.add(publisher)
+
+    return stampable_publishers, do_not_stamp_publishers
+
+
 def scale_from_top_space(top_space_pts: float) -> float:
     if top_space_pts <= 50:
         return 0.95
@@ -4300,6 +4327,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             raw_cues = []
             filtered_cues = []
             matched_publishers = selected_pubs
+            lic_only_publishers: list[str] = []
             accuracy_audits = {}
         else:
             needs_ocr = False
@@ -4425,6 +4453,34 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 auto_match_threshold=0.92,
                 review_threshold=0.85,
             )
+            matched_publishers, lic_only_publishers = partition_publishers_by_stamp_status(
+                matched_publishers,
+                cat_object,
+            )
+
+            if lic_only_publishers and not matched_publishers:
+                api.check_cancel()
+                lic_dir = pdf_path.parent / "_lic"
+                lic_dir.mkdir(exist_ok=True)
+                pdf_path.replace(lic_dir / pdf_path.name)
+                created_dirs.add("_lic")
+                api.log(
+                    "info",
+                    f"{pdf_path.name}: matched only do-not-stamp publishers; moved to _lic | do_not_stamp_publishers={', '.join(lic_only_publishers)}",
+                )
+                api.log(
+                    "info",
+                    f"Processed '{pdf_path.relative_to(target_dir)}' | format={fmt} | total_cues={len(raw_cues)} | filtered_cues={len(filtered_cues)} | matched_controlled_publishers= | do_not_stamp_publishers={', '.join(lic_only_publishers)} | accuracy_audits={str(accuracy_audits)}",
+                )
+                continue
+
+            if lic_only_publishers:
+                api.log(
+                    "info",
+                    f"{pdf_path.name}: matched do-not-stamp publishers excluded from stamp | do_not_stamp_publishers={', '.join(lic_only_publishers)}",
+                )
+        if custom_stamp:
+            lic_only_publishers = []
         matched_main = [p for p in matched_publishers if p in main_pub_set]
         matched_copub = [p for p in matched_publishers if p in copub_pub_set]
         has_both_groups = bool(matched_main) and bool(matched_copub)
@@ -4646,7 +4702,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
         api.log(
             "info",
-            f"Processed '{pdf_path.relative_to(target_dir)}' | format={fmt} | total_cues={len(raw_cues)} | filtered_cues={len(filtered_cues)} | matched_controlled_publishers={', '.join(matched_publishers)} | accuracy_audits={str(accuracy_audits)}",
+            f"Processed '{pdf_path.relative_to(target_dir)}' | format={fmt} | total_cues={len(raw_cues)} | filtered_cues={len(filtered_cues)} | matched_controlled_publishers={', '.join(matched_publishers)} | do_not_stamp_publishers={', '.join(lic_only_publishers)} | accuracy_audits={str(accuracy_audits)}",
         )
 
     api.emit_result(

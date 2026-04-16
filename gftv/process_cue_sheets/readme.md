@@ -34,6 +34,8 @@ formats, and tags matched publishers with XMP metadata and a stamped badge.
 - For non-default parsers, co-publishers are only matched when they appear in the
   same cue as a matched main publisher. Co-publishers are ignored if no main
   publisher is found in that cue.
+- If the only matched publishers have status `Active: Do Not Stamp`, the PDF is moved to `_lic`.
+- If both stampable and `Active: Do Not Stamp` publishers are matched, only the stampable publishers are used for stamping.
 - If controlled publisher has "split" territories, a territory selection prompt will appear.
 - Adds XMP metadata for matched publishers and stamps the first page. (It will remove any existing stamps before adding a new stamp.)
 - By default, writes stamped PDFs to a `_stamped` folder next to the source file.
