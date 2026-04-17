@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
@@ -20,6 +21,7 @@ class CueSheetRow:
     pd_code: str
     film_or_series: str
     revision_status: str
+    cue_sheet: str
     production_title: str
     episode_title: str
     season_number: str
@@ -28,12 +30,21 @@ class CueSheetRow:
     territory: str
 
 
+class ReportModeResponse(TypedDict):
+    value: str
+    report_mode: str
+
+
 _PRODUCTION_DELIM = "   "
 _EPISODE_DELIM = "  "
 _DATEISH_EPISODE_NUMBER_RE = re.compile(
     r"^\d{6,8}(?:-\d+[A-Za-z]?)?$|^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$"
 )
 _EPISODE_CODE_RE = re.compile(r"^\d{4,5}$")
+_MONTHLY_REPORT_MODE = "Monthly Report"
+_WEEKLY_REPORT_MODE = "Weekly Report"
+_MONTHLY_REPORT_SUFFIX = "monthly_report"
+_WEEKLY_REPORT_SUFFIX = "weekly_report"
 
 
 def _parse_series_title_fields(stem: str) -> tuple[str, str, str, str]:
@@ -49,7 +60,9 @@ def _parse_series_title_fields(stem: str) -> tuple[str, str, str, str]:
     episode_title = ""
     episode_info = remainder
     if _EPISODE_DELIM in remainder:
-        possible_episode_title, possible_episode_info = remainder.rsplit(_EPISODE_DELIM, 1)
+        possible_episode_title, possible_episode_info = remainder.rsplit(
+            _EPISODE_DELIM, 1
+        )
         if "Ep No." in possible_episode_info:
             episode_title = possible_episode_title.strip()
             episode_info = possible_episode_info.strip()
@@ -130,6 +143,7 @@ def _parse_cue_sheet_path(pdf_path: Path, root: Path) -> CueSheetRow | None:
         pd_code="",
         film_or_series=film_or_series,
         revision_status=revision_status,
+        cue_sheet=title_stem,
         production_title=production_title,
         episode_title=episode_title,
         season_number=season_number,
@@ -236,6 +250,95 @@ def _write_report(xlsx_path: Path, rows: list[CueSheetRow]) -> None:
     wb.save(xlsx_path)
 
 
+def _write_monthly_report(xlsx_path: Path, rows: list[CueSheetRow]) -> None:
+    _write_report(xlsx_path, rows)
+
+
+def _write_weekly_report(xlsx_path: Path, rows: list[CueSheetRow]) -> None:
+    xlsx_path.parent.mkdir(parents=True, exist_ok=True)
+
+    headers = [
+        "Deal",
+        "Catalog",
+        "Film or Series",
+        "Revision Status",
+        "Cue Sheet",
+        "Territory Code",
+        "Territory",
+    ]
+
+    wb = Workbook()
+    ws = wb.active
+    if ws is None:
+        ws = wb.create_sheet(title="Cue Sheet Summary")
+    else:
+        ws.title = "Cue Sheet Summary"
+
+    header_font = Font(bold=True)
+    header_alignment = Alignment(horizontal="center", vertical="center")
+    data_alignment = Alignment(vertical="center")
+
+    ws.append(headers)
+    for col_idx, _header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font
+        cell.alignment = header_alignment
+
+    for row in rows:
+        ws.append(
+            [
+                row.deal,
+                row.catalog,
+                row.film_or_series,
+                row.revision_status,
+                row.cue_sheet,
+                row.territory_code,
+                row.territory,
+            ]
+        )
+
+    if rows:
+        last_row = len(rows) + 1
+        last_col = len(headers)
+        table_ref = f"A1:{get_column_letter(last_col)}{last_row}"
+        table = Table(displayName="CueSheetSummary", ref=table_ref)
+        table.tableStyleInfo = TableStyleInfo(
+            name="TableStyleLight1",
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False,
+        )
+        ws.add_table(table)
+
+    column_widths = {
+        "A": 40,
+        "B": 18,
+        "C": 16,
+        "D": 18,
+        "E": 56,
+        "F": 18,
+        "G": 18,
+    }
+    for column, width in column_widths.items():
+        ws.column_dimensions[column].width = width
+
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = data_alignment
+
+    wb.save(xlsx_path)
+
+
+def _report_output_stem(target: Path, report_mode: str) -> str:
+    suffix = (
+        _MONTHLY_REPORT_SUFFIX
+        if report_mode == _MONTHLY_REPORT_MODE
+        else _WEEKLY_REPORT_SUFFIX
+    )
+    return f"{target.name}_cue_sheet_{suffix}"
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     target = ctx.target_path
@@ -249,12 +352,30 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         )
         return
 
+    payload = api.request_input_json(
+        "Select cue sheet report type",
+        id="ferp_report_cue_sheet_directory_mode",
+        fields=[
+            {
+                "id": "report_mode",
+                "type": "select",
+                "label": "Report Type",
+                "options": [_WEEKLY_REPORT_MODE, _MONTHLY_REPORT_MODE],
+                "default": _WEEKLY_REPORT_MODE,
+            }
+        ],
+        show_text_input=False,
+        payload_type=ReportModeResponse,
+    )
+    report_mode = str(payload.get("report_mode") or _MONTHLY_REPORT_MODE).strip()
+
     pdf_files = _collect_pdfs(target, api)
     if not pdf_files:
         api.emit_result(
             {
                 "_status": "warn",
                 "_title": "Cue Sheet Report Complete",
+                "Report Type": report_mode,
                 "Rows Written": 0,
                 "Skipped PDFs": 0,
                 "Info": "No PDF files were found under the selected directory.",
@@ -293,10 +414,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
 
     out_path = build_destination(
         target.parent,
-        f"{target.name}_cue_sheet_summary",
+        _report_output_stem(target, report_mode),
         ".xlsx",
     )
-    _write_report(out_path, rows)
+    if report_mode == _MONTHLY_REPORT_MODE:
+        _write_monthly_report(out_path, rows)
+    else:
+        _write_weekly_report(out_path, rows)
 
     if skipped:
         preview = ", ".join(skipped[:5])
@@ -308,6 +432,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     api.emit_result(
         {
             "_title": "Cue Sheet Report Complete",
+            "Report Type": report_mode,
             "XLSX Path": str(out_path),
             "Rows Written": len(rows),
             "Skipped PDFs": len(skipped),
