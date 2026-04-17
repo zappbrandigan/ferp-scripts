@@ -1,10 +1,10 @@
 {
-  "version": "1.6.1",
+  "version": "1.7.0",
   "scripts": [
     {
       "id": "gftv.report_cue_sheet_directory",
       "name": "Report: Cue Sheet Directory",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "script": "scripts/gftv/report_cue_sheet_directory/script.py",
       "dependencies": [
         "openpyxl>=3.1"
