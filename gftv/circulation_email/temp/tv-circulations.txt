@@ -1,0 +1,20 @@
+---
+updated: 4/24/2026
+description: This email template is used to circulate TV cue sheets for a given territory. The values inside braces should be replaced with actual values. If multiple catalogs are being circulated, add additional bullet points indicating each catalog. Use "deal" when only one catalog is included and use "deals" when multiple catalogs are included in the email. The email should be sent from the Cues inbox to the Cues inbox with the subscription list for the territory added to BCC.
+---
+Subject: {New/Revised} Cue Sheet Circulation - {catalog_code(s)}
+
+Hello:
+
+The following link is for {REVISED} TV cue sheets controlled via:
+
+The {deal_owner} office's {deal/deals} with the below for the territory of {territory}.
+•	{catalog}
+
+Please submit the cue sheet to your society and check work registrations to ensure royalties for cinema performance and subsequent TV broadcasting are received. If your society is missing additional cue sheets, then please search on UMPG Cues in the first instance or if the documents you require cannot be located then send a request email to {cues_inbox}.
+
+{revision_notes}
+
+Please note that this link expires after 30 days.
+
+{link}

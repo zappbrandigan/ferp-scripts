@@ -2,6 +2,15 @@
   "version": "1.7.0",
   "scripts": [
     {
+      "id": "gftv.circulation_email",
+      "name": "Generate: Circulation Email Drafts",
+      "version": "1.0.0",
+      "script": "scripts/gftv/circulation_email/script.py",
+      "target": [
+        "highlighted_directory"
+      ]
+    },
+    {
       "id": "gftv.report_cue_sheet_directory",
       "name": "Report: Cue Sheet Directory",
       "version": "1.2.0",
