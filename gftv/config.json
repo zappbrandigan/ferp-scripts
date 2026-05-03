@@ -1,5 +1,5 @@
 {
-  "version": "1.7.0",
+  "version": "1.7.1",
   "scripts": [
     {
       "id": "gftv.circulation_email",
@@ -13,7 +13,7 @@
     {
       "id": "gftv.report_cue_sheet_directory",
       "name": "Report: Cue Sheet Directory",
-      "version": "1.3.0",
+      "version": "1.3.1",
       "script": "scripts/gftv/report_cue_sheet_directory/script.py",
       "dependencies": [
         "openpyxl>=3.1",
@@ -230,7 +230,7 @@
     {
       "id": "gftv.process_cue_sheets",
       "name": "Process: Stamp Cue Sheets",
-      "version": "1.9.1",
+      "version": "1.9.2",
       "script": "scripts/gftv/process_cue_sheets/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8",
