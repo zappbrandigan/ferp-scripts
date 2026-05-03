@@ -3,7 +3,7 @@
   "scripts": [
     {
       "id": "gftv.circulation_email",
-      "name": "Generate: Circulation Email Drafts",
+      "name": "Generate: Circulation Email",
       "version": "1.0.0",
       "script": "scripts/gftv/circulation_email/script.py",
       "target": [
@@ -13,10 +13,11 @@
     {
       "id": "gftv.report_cue_sheet_directory",
       "name": "Report: Cue Sheet Directory",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "script": "scripts/gftv/report_cue_sheet_directory/script.py",
       "dependencies": [
-        "openpyxl>=3.1"
+        "openpyxl>=3.1",
+        "pypdf>=6.6.0"
       ],
       "target": [
         "highlighted_directory"

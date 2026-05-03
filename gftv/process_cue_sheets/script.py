@@ -2191,7 +2191,10 @@ def filter_logos(cues: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
             "OT / LG",
             "CT / LG",
         ]
-        if usage in logo_usages or LOGO_RE.search(usage) or LOGO_RE.search(title):
+        known_logo_titles = ["PRIME VIDEO OPENER"]
+        if any([usage in logo_usages, LOGO_RE.search(usage), LOGO_RE.search(title)]):
+            continue
+        if any(known_logo in title.upper() for known_logo in known_logo_titles):
             continue
         if any(LOGO_RE.search(note or "") for note in notes):
             continue
@@ -4453,9 +4456,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 auto_match_threshold=0.92,
                 review_threshold=0.85,
             )
-            matched_publishers, lic_only_publishers = partition_publishers_by_stamp_status(
-                matched_publishers,
-                cat_object,
+            matched_publishers, lic_only_publishers = (
+                partition_publishers_by_stamp_status(
+                    matched_publishers,
+                    cat_object,
+                )
             )
 
             if lic_only_publishers and not matched_publishers:
