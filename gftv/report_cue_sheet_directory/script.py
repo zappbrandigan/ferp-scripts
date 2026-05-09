@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Sequence, TypeAlias, TypedDict
+from typing import Any, Iterable, Sequence, TypeAlias, TypedDict
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
@@ -173,6 +174,45 @@ def _display_join(values: Iterable[str]) -> str:
     return ", ".join(values)
 
 
+def _load_territory_names(ctx: sdk.ScriptContext) -> dict[str, str]:
+    cache_path = Path(ctx.environment["paths"]["cache_dir"]) / "territories_cache.json"
+    if not cache_path.exists():
+        return {}
+
+    try:
+        raw_cache = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    groups = raw_cache.get("groups") if isinstance(raw_cache, dict) else None
+    rows = groups.get("Territories") if isinstance(groups, dict) else None
+    if not isinstance(rows, list):
+        return {}
+
+    names: dict[str, str] = {}
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("name") or "").strip()
+        columns = item.get("columns")
+        territory = _column_text(columns, "Territory")
+        if code and territory:
+            names[code.casefold()] = territory
+    return names
+
+
+def _column_text(columns: Any, name: str) -> str:
+    if not isinstance(columns, dict):
+        return ""
+    return str(columns.get(name) or "").strip()
+
+
+def _resolve_territory_name(
+    territory_code: str, territory_names: dict[str, str]
+) -> str:
+    return territory_names.get(territory_code.casefold()) or territory_code
+
+
 def _yes_no(value: bool) -> str:
     return "Yes" if value else "No"
 
@@ -270,7 +310,9 @@ def _parse_title_fields(stem: str, media_type: str) -> tuple[str, str, str, str]
     return _parse_series_title_fields(stem)
 
 
-def _parse_cue_sheet_path(pdf_path: Path, root: Path) -> CueSheetRow | None:
+def _parse_cue_sheet_path(
+    pdf_path: Path, root: Path, territory_names: dict[str, str]
+) -> CueSheetRow | None:
     relative_path = pdf_path.relative_to(root)
     relative_parts = relative_path.parts
     if len(relative_parts) < 4:
@@ -329,7 +371,7 @@ def _parse_cue_sheet_path(pdf_path: Path, root: Path) -> CueSheetRow | None:
         season_number=season_number,
         episode_number=episode_number,
         territory_code=territory_code,
-        territory="",
+        territory=_resolve_territory_name(territory_code, territory_names),
     )
 
 
@@ -996,10 +1038,11 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     records: list[CueSheetRecord] = []
     skipped: list[str] = []
     total_files = len(pdf_files)
+    territory_names = _load_territory_names(ctx)
 
     for index, pdf_path in enumerate(pdf_files, start=1):
         api.check_cancel()
-        parsed = _parse_cue_sheet_path(pdf_path, target)
+        parsed = _parse_cue_sheet_path(pdf_path, target, territory_names)
         if parsed is None:
             skipped.append(str(pdf_path.relative_to(target)))
         else:

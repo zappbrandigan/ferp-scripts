@@ -1,0 +1,12 @@
+{
+  "id": "territories",
+  "namespace": "gftv",
+  "label": "FTV Territories",
+  "description": "List of territories and deal locations used for curculations and stamping.",
+  "cacheFilename": "territories_cache.json",
+  "queryFile": "territories.graphql",
+  "transform": {
+    "type": "items_by_group",
+    "keyColumn": "Code"
+  }
+}

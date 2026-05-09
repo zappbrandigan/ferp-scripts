@@ -1,0 +1,11 @@
+{
+  "id": "publishers",
+  "namespace": "gftv",
+  "label": "Publisher Board",
+  "description": "Publisher, territory, control, and split territory data used by GFTV cue-sheet processing.",
+  "cacheFilename": "publishers_cache.json",
+  "queryFile": "publishers.graphql",
+  "transform": {
+    "type": "items_by_group"
+  }
+}

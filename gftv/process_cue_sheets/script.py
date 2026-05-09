@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 import unicodedata
 import uuid
 import warnings
@@ -53,6 +54,56 @@ _CONTEXT_EE_RE = re.compile(r"(?<!\S)EE(?!\S)")
 _LICENSE_NOTE_RE = re.compile(r"(sync\s*license|master\s*license)", re.IGNORECASE)
 ADMINISTRATOR_NAME = ""
 STAMP_SPEC_VERSION = ""
+FILE_OP_RETRY_ATTEMPTS = 6
+FILE_OP_RETRY_DELAY_SECONDS = 0.05
+
+
+def _retry_file_op(operation: Callable[[], Any]) -> Any:
+    delay = FILE_OP_RETRY_DELAY_SECONDS
+    for attempt in range(FILE_OP_RETRY_ATTEMPTS):
+        try:
+            return operation()
+        except PermissionError:
+            if attempt == FILE_OP_RETRY_ATTEMPTS - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
+    return None
+
+
+def _replace_file(src: Path | str, dst: Path | str) -> None:
+    _retry_file_op(lambda: os.replace(src, dst))
+
+
+def _move_file(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(exist_ok=True)
+    _replace_file(src, dst)
+
+
+def _unlink_file(path: Path | str) -> None:
+    file_path = Path(path)
+    if file_path.exists():
+        _retry_file_op(file_path.unlink)
+
+
+def _copy_file(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(exist_ok=True)
+    _retry_file_op(lambda: shutil.copyfile(src, dst))
+
+
+def _close_pdf_reader(reader: PdfReader) -> None:
+    stream = getattr(reader, "stream", None)
+    close = getattr(stream, "close", None)
+    if callable(close):
+        close()
+
+
+def _extract_pdf_document_id_from_path(pdf_path: Path) -> str | None:
+    reader = PdfReader(str(pdf_path))
+    try:
+        return extract_pdf_document_id(reader)
+    finally:
+        _close_pdf_reader(reader)
 
 
 def parse_board_description_yaml(description: str) -> dict[str, str]:
@@ -2847,49 +2898,52 @@ def set_xmp_metadata(
     check_cancel: Callable[[], None] | None = None,
 ) -> None:
     reader = PdfReader(str(input_pdf))
-    writer = PdfWriter()
+    try:
+        writer = PdfWriter()
 
-    for page in reader.pages:
-        if check_cancel is not None:
-            check_cancel()
-        writer.add_page(page)
+        for page in reader.pages:
+            if check_cancel is not None:
+                check_cancel()
+            writer.add_page(page)
 
-    info: dict[str, str] = {}
-    if reader.metadata:
-        for k, v in reader.metadata.items():
-            if isinstance(k, str) and k.startswith("/") and v is not None:
-                info[k] = str(v)
+        info: dict[str, str] = {}
+        if reader.metadata:
+            for k, v in reader.metadata.items():
+                if isinstance(k, str) and k.startswith("/") and v is not None:
+                    info[k] = str(v)
 
-    if info:
-        writer.add_metadata(info)
+        if info:
+            writer.add_metadata(info)
 
-    existing_id = document_id or extract_pdf_document_id(reader)
-    xmp_bytes = build_xmp_metadata(
-        administrator,
-        agreements,
-        catalog_code=catalog_code,
-        document_id=existing_id,
-    )
+        existing_id = document_id or extract_pdf_document_id(reader)
+        xmp_bytes = build_xmp_metadata(
+            administrator,
+            agreements,
+            catalog_code=catalog_code,
+            document_id=existing_id,
+        )
 
-    md_stream = StreamObject()
-    set_data = getattr(md_stream, "set_data", None)
-    if callable(set_data):
-        set_data(xmp_bytes)
-    else:
-        md_stream._data = xmp_bytes
-        md_stream.update({NameObject("/Length"): NumberObject(len(xmp_bytes))})
-    md_stream.update(
-        {
-            NameObject("/Type"): NameObject("/Metadata"),
-            NameObject("/Subtype"): NameObject("/XML"),
-        }
-    )
+        md_stream = StreamObject()
+        set_data = getattr(md_stream, "set_data", None)
+        if callable(set_data):
+            set_data(xmp_bytes)
+        else:
+            md_stream._data = xmp_bytes
+            md_stream.update({NameObject("/Length"): NumberObject(len(xmp_bytes))})
+        md_stream.update(
+            {
+                NameObject("/Type"): NameObject("/Metadata"),
+                NameObject("/Subtype"): NameObject("/XML"),
+            }
+        )
 
-    md_ref = writer._add_object(md_stream)
-    writer._root_object.update({NameObject("/Metadata"): md_ref})
+        md_ref = writer._add_object(md_stream)
+        writer._root_object.update({NameObject("/Metadata"): md_ref})
 
-    with output_pdf.open("wb") as handle:
-        writer.write(handle)
+        with output_pdf.open("wb") as handle:
+            writer.write(handle)
+    finally:
+        _close_pdf_reader(reader)
 
 
 def set_xmp_metadata_inplace(
@@ -2913,10 +2967,9 @@ def set_xmp_metadata_inplace(
             document_id=document_id,
             check_cancel=check_cancel,
         )
-        os.replace(tmp_path, pdf_path)
+        _replace_file(tmp_path, pdf_path)
     finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
+        _unlink_file(tmp_path)
 
 
 def wrap_text(text: str, font_name: str, font_size: float, max_width: float):
@@ -3399,86 +3452,104 @@ def add_stamp(
     logo_path = Path(__file__).resolve().parent / "assets" / "logo.jpg"
 
     reader = PdfReader(str(pdf_path))
-    if not reader.pages:
-        return
+    stamp_reader: PdfReader | None = None
+    temp_path: Path | None = None
+    output_tmp_path: Path | None = None
+    try:
+        if not reader.pages:
+            return
 
-    writer = PdfWriter()
-    first_page = reader.pages[0]
-    rotation = int(first_page.get("/Rotate", 0) or 0) % 360
-    stamp_page_target = (
-        normalize_page_rotation(first_page, writer) if rotation else first_page
-    )
-    page_w, page_h, offset_x, offset_y = get_page_box(stamp_page_target)
+        writer = PdfWriter()
+        first_page = reader.pages[0]
+        rotation = int(first_page.get("/Rotate", 0) or 0) % 360
+        stamp_page_target = (
+            normalize_page_rotation(first_page, writer) if rotation else first_page
+        )
+        page_w, page_h, offset_x, offset_y = get_page_box(stamp_page_target)
 
-    temp_handle = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-    temp_path = Path(temp_handle.name)
-    temp_handle.close()
+        temp_handle = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+        temp_path = Path(temp_handle.name)
+        temp_handle.close()
 
-    c = canvas.Canvas(str(temp_path), pagesize=(page_w, page_h))
+        c = canvas.Canvas(str(temp_path), pagesize=(page_w, page_h))
 
-    badge_info = draw_top_full_badge(
-        c,
-        page_w,
-        page_h,
-        second_line_text=" and ".join(matched_publishers),
-        second_line_phrases=second_line_phrases,
-        deal_start_date_and_territory=multi_territory_rows,
-        image_path=str(logo_path),
-        top_font_name="Helvetica-Bold",
-        bottom_font_name="Helvetica",
-    )
+        badge_info = draw_top_full_badge(
+            c,
+            page_w,
+            page_h,
+            second_line_text=" and ".join(matched_publishers),
+            second_line_phrases=second_line_phrases,
+            deal_start_date_and_territory=multi_territory_rows,
+            image_path=str(logo_path),
+            top_font_name="Helvetica-Bold",
+            bottom_font_name="Helvetica",
+        )
 
-    c.showPage()
-    c.save()
+        c.showPage()
+        c.save()
 
-    stamp_reader = PdfReader(str(temp_path))
-    if not stamp_reader.pages:
-        return
-    stamp_page = stamp_reader.pages[0]
+        stamp_reader = PdfReader(str(temp_path))
+        if not stamp_reader.pages:
+            return
+        stamp_page = stamp_reader.pages[0]
 
-    rect_x, rect_y, rect_w, rect_h = badge_info["rect"]
-    stroke_width = float(badge_info.get("stroke_width", 0.0) or 0.0)
-    inset = stroke_width / 2.0
-    extra_top = max(0.0, stroke_width / 2.0) + 0.25
-    extra_sides = max(0.0, stroke_width / 2.0)
-    cushion = 2.0
-    rect_x_page = rect_x + offset_x - inset - extra_sides - cushion
-    rect_y_page = rect_y + offset_y - inset - cushion
-    rect_w += inset * 2 + extra_sides * 2 + cushion * 2
-    rect_h += inset * 2 + extra_top + cushion * 2
+        rect_x, rect_y, rect_w, rect_h = badge_info["rect"]
+        stroke_width = float(badge_info.get("stroke_width", 0.0) or 0.0)
+        inset = stroke_width / 2.0
+        extra_top = max(0.0, stroke_width / 2.0) + 0.25
+        extra_sides = max(0.0, stroke_width / 2.0)
+        cushion = 2.0
+        rect_x_page = rect_x + offset_x - inset - extra_sides - cushion
+        rect_y_page = rect_y + offset_y - inset - cushion
+        rect_w += inset * 2 + extra_sides * 2 + cushion * 2
+        rect_h += inset * 2 + extra_top + cushion * 2
 
-    for index, page in enumerate(reader.pages):
-        if index == 0:
-            if rotation:
-                page = stamp_page_target
-            _add_stamp_annotation(
-                writer,
-                page,
-                stamp_page,
-                rect_x=rect_x_page,
-                rect_y=rect_y_page,
-                rect_w=rect_w,
-                rect_h=rect_h,
-                shift_x=rect_x - inset - extra_sides - cushion,
-                shift_y=rect_y - inset - cushion,
-                stamp_name="ferp:umpg-stamp",
-            )
-        writer.add_page(page)
+        for index, page in enumerate(reader.pages):
+            if index == 0:
+                if rotation:
+                    page = stamp_page_target
+                _add_stamp_annotation(
+                    writer,
+                    page,
+                    stamp_page,
+                    rect_x=rect_x_page,
+                    rect_y=rect_y_page,
+                    rect_w=rect_w,
+                    rect_h=rect_h,
+                    shift_x=rect_x - inset - extra_sides - cushion,
+                    shift_y=rect_y - inset - cushion,
+                    stamp_name="ferp:umpg-stamp",
+                )
+            writer.add_page(page)
 
-    if reader.metadata:
-        info: dict[str, str] = {}
-        for k, v in reader.metadata.items():
-            if isinstance(k, str) and k.startswith("/") and v is not None:
-                info[k] = str(v)
-        if info:
-            writer.add_metadata(info)
+        if reader.metadata:
+            info: dict[str, str] = {}
+            for k, v in reader.metadata.items():
+                if isinstance(k, str) and k.startswith("/") and v is not None:
+                    info[k] = str(v)
+            if info:
+                writer.add_metadata(info)
 
-    output_path.parent.mkdir(exist_ok=True)
-    with output_path.open("wb") as handle:
-        writer.write(handle)
+        output_path.parent.mkdir(exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            delete=False, dir=output_path.parent, suffix=".pdf"
+        ) as output_tmp:
+            output_tmp_path = Path(output_tmp.name)
+        with output_tmp_path.open("wb") as handle:
+            writer.write(handle)
+    finally:
+        _close_pdf_reader(reader)
+        if stamp_reader is not None:
+            _close_pdf_reader(stamp_reader)
 
-    if temp_path.exists():
-        temp_path.unlink()
+    try:
+        if output_tmp_path is not None:
+            _replace_file(output_tmp_path, output_path)
+    finally:
+        if temp_path is not None:
+            _unlink_file(temp_path)
+        if output_tmp_path is not None:
+            _unlink_file(output_tmp_path)
 
 
 def get_page_box(page) -> tuple[float, float, float, float]:
@@ -3689,69 +3760,76 @@ def make_top_space_first_page_inplace(
     scale: float | None = None,
 ) -> None:
     reader = PdfReader(pdf_path)
-    writer = PdfWriter()
-    scale_value = scale if scale is not None else scale_from_top_space(top_space_pts)
-
-    for i, src_page in enumerate(reader.pages):
-        if i != 0:
-            writer.add_page(src_page)
-            continue
-
-        rotation = int(src_page.get("/Rotate", 0) or 0) % 360
-        page_for_layout = (
-            normalize_page_rotation(src_page, writer) if rotation else src_page
-        )
-
-        # Use MediaBox for physical page size
-        box = page_for_layout.mediabox
-        width = float(box.width)
-        height = float(box.height)
-
-        top_space = float(top_space_pts)
-        dx = (1.0 - scale_value) * width / 2.0
-        dy = (1.0 - scale_value) * height - top_space
-
-        dst_page = PageObject.create_blank_page(pdf=writer, width=width, height=height)
-        if page_for_layout.cropbox:
-            dst_page.cropbox = page_for_layout.cropbox
-        if getattr(page_for_layout, "bleedbox", None):
-            dst_page.bleedbox = page_for_layout.bleedbox
-        if getattr(page_for_layout, "trimbox", None):
-            dst_page.trimbox = page_for_layout.trimbox
-        if getattr(page_for_layout, "artbox", None):
-            dst_page.artbox = page_for_layout.artbox
-        transform = Transformation().scale(scale_value, scale_value).translate(dx, dy)
-        merge_transformed = getattr(dst_page, "merge_transformed_page", None)
-        if callable(merge_transformed):
-            merge_transformed(page_for_layout, transform)
-        else:
-            add_transformation = getattr(page_for_layout, "add_transformation", None)
-            if callable(add_transformation):
-                add_transformation(transform)
-            dst_page.merge_page(page_for_layout)
-        writer.add_page(dst_page)
-
-    # ---- Copy Document Info metadata ----
-    if reader.metadata:
-        md: dict[str, str] = {}
-        for k, v in reader.metadata.items():
-            if isinstance(k, str) and k.startswith("/") and v is not None:
-                md[str(k)] = str(v)
-        if md:
-            writer.add_metadata(md)
-
-    # ---- Safe in-place overwrite ----
-    dir_name = os.path.dirname(pdf_path)
-    with tempfile.NamedTemporaryFile(delete=False, dir=dir_name, suffix=".pdf") as tmp:
-        tmp_path = tmp.name
-
     try:
-        with open(tmp_path, "wb") as handle:
-            writer.write(handle)
-        os.replace(tmp_path, pdf_path)  # atomic on most platforms
+        writer = PdfWriter()
+        scale_value = scale if scale is not None else scale_from_top_space(top_space_pts)
+
+        for i, src_page in enumerate(reader.pages):
+            if i != 0:
+                writer.add_page(src_page)
+                continue
+
+            rotation = int(src_page.get("/Rotate", 0) or 0) % 360
+            page_for_layout = (
+                normalize_page_rotation(src_page, writer) if rotation else src_page
+            )
+
+            # Use MediaBox for physical page size
+            box = page_for_layout.mediabox
+            width = float(box.width)
+            height = float(box.height)
+
+            top_space = float(top_space_pts)
+            dx = (1.0 - scale_value) * width / 2.0
+            dy = (1.0 - scale_value) * height - top_space
+
+            dst_page = PageObject.create_blank_page(
+                pdf=writer, width=width, height=height
+            )
+            if page_for_layout.cropbox:
+                dst_page.cropbox = page_for_layout.cropbox
+            if getattr(page_for_layout, "bleedbox", None):
+                dst_page.bleedbox = page_for_layout.bleedbox
+            if getattr(page_for_layout, "trimbox", None):
+                dst_page.trimbox = page_for_layout.trimbox
+            if getattr(page_for_layout, "artbox", None):
+                dst_page.artbox = page_for_layout.artbox
+            transform = Transformation().scale(scale_value, scale_value).translate(dx, dy)
+            merge_transformed = getattr(dst_page, "merge_transformed_page", None)
+            if callable(merge_transformed):
+                merge_transformed(page_for_layout, transform)
+            else:
+                add_transformation = getattr(page_for_layout, "add_transformation", None)
+                if callable(add_transformation):
+                    add_transformation(transform)
+                dst_page.merge_page(page_for_layout)
+            writer.add_page(dst_page)
+
+        # ---- Copy Document Info metadata ----
+        if reader.metadata:
+            md: dict[str, str] = {}
+            for k, v in reader.metadata.items():
+                if isinstance(k, str) and k.startswith("/") and v is not None:
+                    md[str(k)] = str(v)
+            if md:
+                writer.add_metadata(md)
+
+        # ---- Safe in-place overwrite ----
+        dir_name = os.path.dirname(pdf_path)
+        with tempfile.NamedTemporaryFile(
+            delete=False, dir=dir_name, suffix=".pdf"
+        ) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            with open(tmp_path, "wb") as handle:
+                writer.write(handle)
+            _close_pdf_reader(reader)
+            _replace_file(tmp_path, pdf_path)  # atomic on most platforms
+        finally:
+            _unlink_file(tmp_path)
     finally:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+        _close_pdf_reader(reader)
 
 
 def resolve_multi_territory_rows(
@@ -3923,6 +4001,89 @@ def build_agreements_for_groups(
     return agreements
 
 
+def normalize_publishers_cache(raw_cache: Any) -> dict[str, Any]:
+    if not isinstance(raw_cache, dict):
+        return {}
+    groups = raw_cache.get("groups")
+    if not isinstance(groups, dict):
+        return raw_cache
+
+    normalized: dict[str, Any] = {}
+    meta = raw_cache.get("__meta__")
+    if isinstance(meta, dict):
+        normalized["__meta__"] = meta
+
+    for group_name, rows in groups.items():
+        if not isinstance(rows, list):
+            continue
+        group_key = str(group_name).strip().lower()
+        if not group_key:
+            continue
+        bucket: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            entry = _normalized_publisher_entry(row)
+            if entry is not None:
+                bucket.append(entry)
+        if bucket:
+            normalized[group_key] = bucket
+    return normalized
+
+
+def _normalized_publisher_entry(row: dict[str, Any]) -> dict[str, Any] | None:
+    columns = row.get("columns")
+    if not isinstance(columns, dict):
+        columns = {}
+
+    publisher = _column_text(columns, "Publisher") or str(row.get("name") or "").strip()
+    if not publisher:
+        return None
+
+    entry: dict[str, Any] = {
+        "publisher": publisher,
+        "territory": _column_text(columns, "Territory"),
+        "control type": _column_text(columns, "Control Type"),
+        "effective date": _column_text(columns, "Effective Date"),
+        "expiration date": _column_text(columns, "Expiration Date"),
+        "status": _column_text(columns, "Status"),
+        "observed_name_variants": normalize_observed_name_variants(
+            _column_text(columns, "Observed Name Variants")
+        ),
+    }
+
+    territory_mode = str(entry.get("territory") or "").strip()
+    subitem_rows = _normalized_subitem_rows(row.get("subitems") or [])
+    if territory_mode == "Multiple" and subitem_rows:
+        entry["multi_territory"] = subitem_rows
+    elif territory_mode == "Split" and subitem_rows:
+        entry["split_territory"] = subitem_rows
+    return entry
+
+
+def _normalized_subitem_rows(subitems: list[Any]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for subitem in subitems:
+        if not isinstance(subitem, dict):
+            continue
+        columns = subitem.get("columns")
+        if not isinstance(columns, dict):
+            columns = {}
+        rows.append(
+            {
+                "effective date": _column_text(columns, "Effective Date"),
+                "territory": _column_text(columns, "Territory"),
+                "status": _column_text(columns, "Status"),
+                "territory_code": str(subitem.get("name") or "").strip(),
+            }
+        )
+    return rows
+
+
+def _column_text(columns: dict[Any, Any], name: str) -> str:
+    return str(columns.get(name) or "").strip()
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     env_paths = ctx.environment.get("paths", {})
@@ -3946,7 +4107,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         USER_NAME = "FERP"
 
     with cache_path.open("r", encoding="utf-8") as handle:
-        pubs = json.load(handle)
+        pubs = normalize_publishers_cache(json.load(handle))
     pub_keys = [key for key in pubs.keys() if not str(key).startswith("__")]
     pub_key_set = set(pub_keys)
     meta = pubs.get("__meta__", {}) if isinstance(pubs, dict) else {}
@@ -4189,8 +4350,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     def _cleanup() -> None:
         for path in temp_paths:
             try:
-                if path.exists():
-                    path.unlink()
+                _unlink_file(path)
             except OSError:
                 pass
 
@@ -4258,7 +4418,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             if adjust_header:
                 temp_path = pdf_path.with_suffix(".header.tmp.pdf")
                 temp_paths.append(temp_path)
-                shutil.copyfile(pdf_path, temp_path)
+                _copy_file(pdf_path, temp_path)
                 make_top_space_first_page_inplace(temp_path, header_top_space)
                 work_path = temp_path
 
@@ -4280,7 +4440,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 }
             ]
             try:
-                existing_id = extract_pdf_document_id(PdfReader(str(pdf_path)))
+                existing_id = _extract_pdf_document_id_from_path(pdf_path)
             except Exception as exc:
                 api.log(
                     "warn",
@@ -4403,7 +4563,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             if needs_ocr:
                 ocr_dir = pdf_path.parent / "_needs_ocr"
                 ocr_dir.mkdir(exist_ok=True)
-                pdf_path.replace(ocr_dir / pdf_path.name)
+                _move_file(pdf_path, ocr_dir / pdf_path.name)
                 created_dirs.add("_needs_ocr")
                 api.log(
                     "warn",
@@ -4467,7 +4627,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 api.check_cancel()
                 lic_dir = pdf_path.parent / "_lic"
                 lic_dir.mkdir(exist_ok=True)
-                pdf_path.replace(lic_dir / pdf_path.name)
+                _move_file(pdf_path, lic_dir / pdf_path.name)
                 created_dirs.add("_lic")
                 api.log(
                     "info",
@@ -4506,7 +4666,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             if main_territory_mode == "mixed" or copub_territory_mode == "mixed":
                 err_dir = pdf_path.parent / "_error"
                 err_dir.mkdir(exist_ok=True)
-                pdf_path.replace(err_dir / pdf_path.name)
+                _move_file(pdf_path, err_dir / pdf_path.name)
                 created_dirs.add("_error")
                 api.log(
                     "error",
@@ -4541,7 +4701,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     if not set(default_split_selection).issubset(available_codes):
                         err_dir = pdf_path.parent / "_error"
                         err_dir.mkdir(exist_ok=True)
-                        pdf_path.replace(err_dir / pdf_path.name)
+                        _move_file(pdf_path, err_dir / pdf_path.name)
                         created_dirs.add("_error")
                         api.log(
                             "error",
@@ -4592,7 +4752,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             if adjust_header:
                 temp_path = pdf_path.with_suffix(".header.tmp.pdf")
                 temp_paths.append(temp_path)
-                shutil.copyfile(pdf_path, temp_path)
+                _copy_file(pdf_path, temp_path)
                 make_top_space_first_page_inplace(temp_path, header_top_space)
                 work_path = temp_path
             api.check_cancel()
@@ -4609,7 +4769,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             if needs_split and selected_codes and not (main_rows or copub_rows):
                 err_dir = pdf_path.parent / "_error"
                 err_dir.mkdir(exist_ok=True)
-                pdf_path.replace(err_dir / pdf_path.name)
+                _move_file(pdf_path, err_dir / pdf_path.name)
                 created_dirs.add("_error")
                 api.log(
                     "error",
@@ -4656,7 +4816,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 cat_object,
             )
             try:
-                existing_id = extract_pdf_document_id(PdfReader(str(pdf_path)))
+                existing_id = _extract_pdf_document_id_from_path(pdf_path)
             except Exception as exc:
                 api.log(
                     "warn",
@@ -4702,7 +4862,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             api.check_cancel()
             nop_dir = pdf_path.parent / "_nop"
             nop_dir.mkdir(exist_ok=True)
-            pdf_path.replace(nop_dir / pdf_path.name)
+            _move_file(pdf_path, nop_dir / pdf_path.name)
             created_dirs.add("_nop")
 
         api.log(
