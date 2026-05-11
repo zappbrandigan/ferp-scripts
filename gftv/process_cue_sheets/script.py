@@ -1976,32 +1976,47 @@ def parse_via(
                 detected["title"] = idx
             elif "writer" in text:
                 detected["composers"] = idx
-            elif "publisher" in text:
+            elif "publisher" in text or "copyright" in text:
                 detected["publishers"] = idx
             elif "use type" in text or text.startswith("use") or text == "use type":
                 detected["usage"] = idx
         return detected
 
-    header_map = {}
-    detected = detect_via_header_map(pdf.pages[0].extract_table()[0])
+    first_table = pdf.pages[0].extract_table() or []
+    first_header = first_table[0] if first_table else []
+    detected = detect_via_header_map(first_header)
     if required_headers.issubset(detected):
         header_map = detected
-    elif log_fn:
-        missing = ", ".join(sorted(required_headers - set(detected)))
-        log_fn(f"via parser: incomplete header_map, missing={missing}")
-    for page in pdf.pages:
+    else:
+        if log_fn:
+            missing = required_headers - set(detected)
+            log_fn(
+                "via parser: incomplete header_map, "
+                f"missing={', '.join(sorted(missing))}"
+            )
+        return cues
+
+    for page_index, page in enumerate(pdf.pages):
         if check_cancel is not None:
             check_cancel()
         pages_scanned += 1
         pages_with_tables += 1
         table = page.extract_table() or []
-        for row in table:
-            rows_total += 1
-            row = (row + [""] * 10)[:10]
+        for row_index, row in enumerate(table):
+            if page_index == 0 and row_index == 0:
+                continue
+
+            row = list(row or [])
+            row = (row + [""] * (max(header_map.values()) + 1))[
+                : max(header_map.values()) + 1
+            ]
             publishers = clean(row[header_map["publishers"]])
             if SKIP_PUB.search(publishers):
                 skipped_pub_count += 1
                 continue
+            if not clean(row[header_map["title"]]) and not publishers:
+                continue
+            rows_total += 1
             cues.append(
                 {
                     "cue_no": clean(row[header_map["cue_no"]]),
