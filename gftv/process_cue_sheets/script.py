@@ -1983,7 +1983,10 @@ def parse_via(
         return detected
 
     first_table = pdf.pages[0].extract_table() or []
-    first_header = first_table[0] if first_table else []
+    first_header = []
+    for idx, row in enumerate(first_table):
+        if str(row[0]).strip() == "#":
+            first_header = first_table[idx]
     detected = detect_via_header_map(first_header)
     if required_headers.issubset(detected):
         header_map = detected
@@ -3777,7 +3780,9 @@ def make_top_space_first_page_inplace(
     reader = PdfReader(pdf_path)
     try:
         writer = PdfWriter()
-        scale_value = scale if scale is not None else scale_from_top_space(top_space_pts)
+        scale_value = (
+            scale if scale is not None else scale_from_top_space(top_space_pts)
+        )
 
         for i, src_page in enumerate(reader.pages):
             if i != 0:
@@ -3809,12 +3814,16 @@ def make_top_space_first_page_inplace(
                 dst_page.trimbox = page_for_layout.trimbox
             if getattr(page_for_layout, "artbox", None):
                 dst_page.artbox = page_for_layout.artbox
-            transform = Transformation().scale(scale_value, scale_value).translate(dx, dy)
+            transform = (
+                Transformation().scale(scale_value, scale_value).translate(dx, dy)
+            )
             merge_transformed = getattr(dst_page, "merge_transformed_page", None)
             if callable(merge_transformed):
                 merge_transformed(page_for_layout, transform)
             else:
-                add_transformation = getattr(page_for_layout, "add_transformation", None)
+                add_transformation = getattr(
+                    page_for_layout, "add_transformation", None
+                )
                 if callable(add_transformation):
                     add_transformation(transform)
                 dst_page.merge_page(page_for_layout)
