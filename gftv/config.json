@@ -1,5 +1,5 @@
 {
-  "version": "2.0.3",
+  "version": "2.1.0",
   "scripts": [
     {
       "id": "gftv.circulation_email",
@@ -13,7 +13,7 @@
     {
       "id": "gftv.report_cue_sheet_directory",
       "name": "Report: Cue Sheet Directory",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "script": "scripts/gftv/report_cue_sheet_directory/script.py",
       "dependencies": [
         "openpyxl>=3.1",
@@ -71,7 +71,7 @@
     {
       "id": "gftv.normalize_pdf_names",
       "name": "Normalize: Cue Sheet Names",
-      "version": "1.0.4",
+      "version": "1.1.0",
       "script": "scripts/gftv/normalize_pdf_names/script.py",
       "dependencies": [
         "googletrans==4.0.2",
