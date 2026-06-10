@@ -127,6 +127,7 @@ class PublisherInsightBucket:
 
 _PRODUCTION_DELIM = "   "
 _EPISODE_DELIM = "  "
+_TRUNCATION_MARKER = ". . ."
 _DATEISH_EPISODE_NUMBER_RE = re.compile(
     r"^\d{6,8}(?:-\d+[A-Za-z]?)?$|^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$"
 )
@@ -308,6 +309,64 @@ def _parse_title_fields(stem: str, media_type: str) -> tuple[str, str, str, str]
     if media_type == "film":
         return stem, "", "", ""
     return _parse_series_title_fields(stem)
+
+
+def _replace_title_fields_from_metadata(
+    row: CueSheetRow,
+    metadata: FerpXmpMetadata | None,
+) -> CueSheetRow:
+    if metadata is None:
+        return row
+    if _TRUNCATION_MARKER not in row.cue_sheet:
+        return row
+
+    production_title = metadata.production_title or row.production_title
+    episode_title = metadata.episode_title or row.episode_title
+    season_number = row.season_number
+    episode_number = row.episode_number
+
+    if row.film_or_series == "Series" and metadata.episode_info:
+        metadata_stem = _format_metadata_title_stem(
+            production_title,
+            episode_title,
+            metadata.episode_info,
+        )
+        (
+            _metadata_production,
+            _metadata_episode_title,
+            season_number,
+            episode_number,
+        ) = _parse_series_title_fields(metadata_stem)
+
+    return CueSheetRow(
+        relative_path=row.relative_path,
+        date_range=row.date_range,
+        deal=row.deal,
+        catalog=row.catalog,
+        pd_code=row.pd_code,
+        film_or_series=row.film_or_series,
+        revision_status=row.revision_status,
+        cue_sheet=row.cue_sheet,
+        production_title=production_title,
+        episode_title=episode_title,
+        season_number=season_number,
+        episode_number=episode_number,
+        territory_code=row.territory_code,
+        territory=row.territory,
+    )
+
+
+def _format_metadata_title_stem(
+    production_title: str,
+    episode_title: str,
+    episode_info: str,
+) -> str:
+    if episode_title:
+        return (
+            f"{production_title}{_PRODUCTION_DELIM}"
+            f"{episode_title}{_EPISODE_DELIM}{episode_info}"
+        )
+    return f"{production_title}{_PRODUCTION_DELIM}{episode_info}"
 
 
 def _parse_cue_sheet_path(
@@ -1046,11 +1105,15 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         if parsed is None:
             skipped.append(str(pdf_path.relative_to(target)))
         else:
-            rows.append(parsed)
-            if report_mode == _STATISTICAL_REPORT_MODE:
+            metadata: FerpXmpMetadata | None = None
+            metadata_error = ""
+            should_read_metadata = (
+                report_mode == _STATISTICAL_REPORT_MODE
+                or _TRUNCATION_MARKER in parsed.cue_sheet
+            )
+            if should_read_metadata:
                 try:
                     metadata = read_pdf_ferp_metadata(pdf_path)
-                    metadata_error = ""
                 except Exception as exc:  # noqa: BLE001
                     metadata = None
                     metadata_error = str(exc)
@@ -1058,6 +1121,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                         "warn",
                         f"Failed to read XMP metadata for '{pdf_path.name}': {exc}",
                     )
+
+            parsed = _replace_title_fields_from_metadata(parsed, metadata)
+            rows.append(parsed)
+            if report_mode == _STATISTICAL_REPORT_MODE:
                 records.append(_record_from_metadata(parsed, metadata, metadata_error))
         api.progress(current=index, total=total_files, unit="files")
 

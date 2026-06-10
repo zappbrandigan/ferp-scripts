@@ -132,6 +132,12 @@ class ParsedName:
 
 
 @dataclass
+class NormalizedName:
+    filename_stem: str
+    metadata: ParsedName
+
+
+@dataclass
 class FileOutcome:
     kind: Literal["valid", "renamed", "moved"]
     source: Path
@@ -168,7 +174,7 @@ def _parse_name(raw: str) -> tuple[ParsedName | None, str | None]:
     return None, "ambiguous_delimiters"
 
 
-def _normalize_name(parsed: ParsedName) -> tuple[str | None, str | None]:
+def _normalize_name(parsed: ParsedName) -> tuple[NormalizedName | None, str | None]:
     production = _normalize_spaces(parsed.production)
     if not production:
         return None, "unrepairable_structure"
@@ -215,6 +221,7 @@ def _normalize_name(parsed: ParsedName) -> tuple[str | None, str | None]:
     else:
         episode_info = None
 
+    metadata = ParsedName(production, episode_title, episode_info, parsed.shape)
     parts = ParsedName(production, episode_title, episode_info, parsed.shape)
 
     length_reason = _enforce_length(parts)
@@ -222,7 +229,7 @@ def _normalize_name(parsed: ParsedName) -> tuple[str | None, str | None]:
         return None, length_reason
 
     formatted = _format_name(parts)
-    return formatted, None
+    return NormalizedName(formatted, metadata), None
 
 
 def _normalize_spaces(value: str) -> str:
@@ -626,6 +633,30 @@ def _rel(root: Path, path: Path | None) -> str:
         return str(path)
 
 
+def _write_name_metadata(
+    path: Path,
+    metadata: ParsedName,
+    root: Path,
+    api: sdk.ScriptAPI,
+) -> None:
+    try:
+        from ferp.fscp.scripts.common.metadata import (
+            set_pdf_ferp_title_metadata_inplace,
+        )
+
+        set_pdf_ferp_title_metadata_inplace(
+            path,
+            production_title=metadata.production,
+            episode_title=metadata.episode_title,
+            episode_info=metadata.episode_info,
+        )
+    except Exception as exc:
+        api.log(
+            "warn",
+            f"Failed to write PDF metadata for '{_rel(root, path)}': {exc}",
+        )
+
+
 @sdk.script
 def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     root = ctx.target_path
@@ -701,8 +732,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             )
             continue
 
-        normalized, normalize_reason = _normalize_name(parsed)
-        if not normalized:
+        normalized_name, normalize_reason = _normalize_name(parsed)
+        if not normalized_name:
             outcome = _record_move(
                 outcomes,
                 moved_sources,
@@ -721,7 +752,10 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             )
             continue
 
+        normalized = normalized_name.filename_stem
+        metadata = normalized_name.metadata
         if normalized == stem:
+            _write_name_metadata(path, metadata, root, api)
             outcomes.append(FileOutcome("valid", path, None))
             continue
 
@@ -828,6 +862,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 ),
             )
         else:
+            _write_name_metadata(destination, metadata, root, api)
             outcomes.append(FileOutcome("renamed", path, destination))
             api.log(
                 "info",
