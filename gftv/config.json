@@ -176,10 +176,10 @@
       ]
     },
     {
-      "id": "gftv.rename_uvs",
-      "name": "Rename: UVS",
+      "id": "gftv.rename_rapidcue",
+      "name": "Rename: RapidCue",
       "version": "1.0.3",
-      "script": "scripts/gftv/rename_uvs/script.py",
+      "script": "scripts/gftv/rename_rapidcue/script.py",
       "dependencies": [
         "pdfplumber>=0.11.8"
       ],

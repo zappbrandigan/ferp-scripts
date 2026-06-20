@@ -1,6 +1,6 @@
-# Rename UVS
+# Rename RapidCue
 
-Renames UVS PDFs in the highlighted directory using the production title
+Renames RapidCue PDFs in the highlighted directory using the production title
 from the filename plus the episode number or air date found on page 1.
 
 ---
@@ -14,7 +14,7 @@ from the filename plus the episode number or air date found on page 1.
 ## Usage
 
 1. Highlight the folder containing the UVS TEL PDFs you want to rename.
-2. Run `Rename UVS Tel` from the Scripts panel.
+2. Run `Rename: RapidCue` from the Scripts panel.
 3. Wait for the script to finish; refreshed filenames will appear in the tree.
 
 ## Behavior
