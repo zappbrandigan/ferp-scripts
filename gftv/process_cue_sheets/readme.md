@@ -20,8 +20,9 @@ formats, and tags matched publishers with XMP metadata and a stamped badge.
 5. (Optional) Select `Add header` to add blank space at the top of the PDF.
 6. (Optional) Select `Recursive` if you want to process subdirectories.
 7. (Optional) Toggle `Select publishers` to bypass parsing and manually choose publishers for the stamp.
-8. (Optional) Select `Custom stamp` to enter custom text for the publisher names, territory, and start date.
-9. Review logs and the output folders.
+8. (Optional) Toggle `By Sub-Catalog` and select one or more sub-catalogs to restrict which matched publishers are stamped.
+9. (Optional) Select `Custom stamp` to enter custom text for the publisher names, territory, and start date.
+10. Review logs and the output folders.
 
 > For co-pub situations, enter a comma separated list of catalog codes. The first catalog code will be considered
 > `primary` publishers and the rest will be considered the `co-`publishers.
@@ -36,6 +37,8 @@ formats, and tags matched publishers with XMP metadata and a stamped badge.
   publisher is found in that cue.
 - If the only matched publishers have status `Active: Do Not Stamp`, the PDF is moved to `_lic`.
 - If both stampable and `Active: Do Not Stamp` publishers are matched, only the stampable publishers are used for stamping.
+- When `By Sub-Catalog` is enabled, matched publishers outside the selected sub-catalogs are treated as `_lic` publishers.
+- When `Select publishers` and `By Sub-Catalog` are both enabled, sub-catalogs are selected first and the publisher list is limited to those sub-catalogs.
 - If controlled publisher has "split" territories, a territory selection prompt will appear.
 - Adds XMP metadata for matched publishers and stamps the first page. (It will remove any existing stamps before adding a new stamp.)
 - By default, writes stamped PDFs to a `_stamped` folder next to the source file.

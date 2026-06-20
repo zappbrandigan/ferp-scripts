@@ -12,6 +12,7 @@ import time
 import unicodedata
 import uuid
 import warnings
+import xml.etree.ElementTree as ET
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,6 +42,7 @@ from ferp.fscp.scripts import sdk
 from ferp.fscp.scripts.common import (
     collect_files,
     extract_pdf_document_id,
+    extract_pdf_xmp_text,
     generate_document_id,
     normalize_document_id,
 )
@@ -56,6 +58,15 @@ ADMINISTRATOR_NAME = ""
 STAMP_SPEC_VERSION = ""
 FILE_OP_RETRY_ATTEMPTS = 6
 FILE_OP_RETRY_DELAY_SECONDS = 0.05
+XMP_NS = "adobe:ns:meta/"
+RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+FERP_NS = "https://tulbox.app/ferp/xmp/1.0"
+XMP_MM_NS = "http://ns.adobe.com/xap/1.0/mm/"
+
+ET.register_namespace("x", XMP_NS)
+ET.register_namespace("rdf", RDF_NS)
+ET.register_namespace("ferp", FERP_NS)
+ET.register_namespace("xmpMM", XMP_MM_NS)
 
 
 def _retry_file_op(operation: Callable[[], Any]) -> Any:
@@ -131,12 +142,18 @@ class UserResponse(TypedDict):
     in_place: bool
     adjust_header: bool
     manual_select: bool
+    by_sub_catalog: bool
     custom_stamp: bool
 
 
 class PublisherSelectionResponse(TypedDict):
     value: str
     selected_pubs: list[str]
+
+
+class SubCatalogSelectionResponse(TypedDict):
+    value: str
+    selected_sub_catalogs: list[str]
 
 
 class SplitTerritorySelectionResponse(TypedDict):
@@ -2810,18 +2827,17 @@ def build_xmp_metadata(
     *,
     catalog_code: str | None = None,
     document_id: str | None = None,
+    existing_xmp: str | None = None,
 ) -> bytes:
     """
-    Build an XMP packet containing ferp:administrator and ferp:agreements.
+    Build an XMP packet containing the stamp metadata.
+
+    Existing XMP is retained. Only the FERP stamp fields and xmpMM identifiers
+    managed by this operation are replaced.
     Returns UTF-8 XML bytes.
     """
     admin_value = normalize_text_value(administrator)
     catalog_value = normalize_text_value(catalog_code) if catalog_code else ""
-    catalog_line = ""
-    if catalog_value:
-        catalog_line = (
-            f"      <ferp:catalogCode>{escape_xml(catalog_value)}</ferp:catalogCode>\n"
-        )
     added_date = datetime.now(timezone.utc).date().isoformat()
     if document_id:
         normalized = normalize_document_id(document_id)
@@ -2829,80 +2845,117 @@ def build_xmp_metadata(
     if not document_id:
         document_id = generate_document_id()
     instance_id = f"uuid:{uuid.uuid4()}"
-    agreement_items: list[str] = []
+    try:
+        payload_match = re.search(
+            r"(<x:xmpmeta\b.*?</x:xmpmeta>)",
+            existing_xmp or "",
+            re.DOTALL,
+        )
+        payload = payload_match.group(1) if payload_match else existing_xmp or ""
+        root = ET.fromstring(payload)
+    except ET.ParseError:
+        root = ET.Element(f"{{{XMP_NS}}}xmpmeta")
+
+    rdf = root.find(f".//{{{RDF_NS}}}RDF")
+    if rdf is None:
+        rdf = ET.SubElement(root, f"{{{RDF_NS}}}RDF")
+
+    managed_fields = {
+        f"{{{FERP_NS}}}administrator",
+        f"{{{FERP_NS}}}catalogCode",
+        f"{{{FERP_NS}}}dataAddedDate",
+        f"{{{FERP_NS}}}stampSpecVersion",
+        f"{{{FERP_NS}}}agreements",
+        f"{{{XMP_MM_NS}}}DocumentID",
+        f"{{{XMP_MM_NS}}}InstanceID",
+    }
+    for parent in root.iter():
+        for attribute_name in set(parent.attrib) & managed_fields:
+            del parent.attrib[attribute_name]
+        for child in list(parent):
+            if child.tag in managed_fields:
+                parent.remove(child)
+
+    description = next(
+        (
+            candidate
+            for candidate in rdf.findall(f"./{{{RDF_NS}}}Description")
+            if any(child.tag.startswith(f"{{{FERP_NS}}}") for child in candidate)
+        ),
+        None,
+    )
+    if description is None:
+        description = rdf.find(f"./{{{RDF_NS}}}Description")
+    if description is None:
+        description = ET.SubElement(rdf, f"{{{RDF_NS}}}Description")
+
+    def add_scalar(namespace: str, name: str, value: str) -> None:
+        if not value:
+            return
+        element = ET.SubElement(description, f"{{{namespace}}}{name}")
+        element.text = value
+
+    add_scalar(FERP_NS, "administrator", admin_value)
+    add_scalar(FERP_NS, "catalogCode", catalog_value)
+    add_scalar(FERP_NS, "dataAddedDate", added_date)
+    add_scalar(FERP_NS, "stampSpecVersion", STAMP_SPEC_VERSION)
+    add_scalar(XMP_MM_NS, "DocumentID", document_id)
+    add_scalar(XMP_MM_NS, "InstanceID", instance_id)
+
+    agreement_elements: list[ET.Element] = []
     for agreement in agreements:
         publishers = normalize_unique(agreement.get("publishers", []), sort=False)
         if not publishers:
             continue
-        publisher_items = "\n".join(
-            f"                <rdf:li>{escape_xml(p)}</rdf:li>" for p in publishers
+        agreement_element = ET.Element(
+            f"{{{RDF_NS}}}li",
+            {f"{{{RDF_NS}}}parseType": "Resource"},
         )
-        effective_entries = agreement.get("effective_dates", [])
-        effective_items: list[str] = []
-        for entry in effective_entries:
+        publishers_element = ET.SubElement(
+            agreement_element, f"{{{FERP_NS}}}publishers"
+        )
+        publishers_bag = ET.SubElement(publishers_element, f"{{{RDF_NS}}}Bag")
+        for publisher in publishers:
+            ET.SubElement(publishers_bag, f"{{{RDF_NS}}}li").text = publisher
+
+        effective_elements: list[ET.Element] = []
+        for entry in agreement.get("effective_dates", []):
             date_value = normalize_text_value(entry.get("date", ""))
             if not date_value:
                 continue
             territories = normalize_unique(entry.get("territories", []), sort=True)
-            territory_items = "\n".join(
-                f"                        <rdf:li>{escape_xml(t)}</rdf:li>"
-                for t in territories
+            effective_element = ET.Element(
+                f"{{{RDF_NS}}}li",
+                {f"{{{RDF_NS}}}parseType": "Resource"},
             )
-            effective_items.append(
-                f"""              <rdf:li rdf:parseType="Resource">
-                <ferp:date>{escape_xml(date_value)}</ferp:date>
-                <ferp:territories>
-                  <rdf:Bag>
-{territory_items}
-                  </rdf:Bag>
-                </ferp:territories>
-              </rdf:li>"""
+            ET.SubElement(effective_element, f"{{{FERP_NS}}}date").text = date_value
+            territories_element = ET.SubElement(
+                effective_element, f"{{{FERP_NS}}}territories"
             )
-        effective_block = ""
-        if effective_items:
-            effective_block = (
-                "            <ferp:effectiveDates>\n"
-                "              <rdf:Seq>\n"
-                + "\n".join(effective_items)
-                + "\n              </rdf:Seq>\n"
-                "            </ferp:effectiveDates>\n"
-            )
-        agreement_items.append(
-            f"""      <rdf:li rdf:parseType="Resource">
-        <ferp:publishers>
-          <rdf:Bag>
-{publisher_items}
-          </rdf:Bag>
-        </ferp:publishers>
-{effective_block}      </rdf:li>"""
-        )
+            territories_bag = ET.SubElement(territories_element, f"{{{RDF_NS}}}Bag")
+            for territory in territories:
+                ET.SubElement(territories_bag, f"{{{RDF_NS}}}li").text = territory
+            effective_elements.append(effective_element)
 
-    agreement_block = ""
-    if agreement_items:
-        agreement_block = (
-            "      <ferp:agreements>\n"
-            "        <rdf:Bag>\n"
-            + "\n".join(agreement_items)
-            + "\n        </rdf:Bag>\n"
-            "      </ferp:agreements>\n"
-        )
+        if effective_elements:
+            effective_dates = ET.SubElement(
+                agreement_element, f"{{{FERP_NS}}}effectiveDates"
+            )
+            effective_sequence = ET.SubElement(effective_dates, f"{{{RDF_NS}}}Seq")
+            effective_sequence.extend(effective_elements)
+        agreement_elements.append(agreement_element)
 
-    xmp = f"""<?xpacket begin='' id='W5M0MpCehiHzreSzNTczkc9d'?>
-<x:xmpmeta xmlns:x="adobe:ns:meta/">
-  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
-    <rdf:Description
-      xmlns:ferp="https://tulbox.app/ferp/xmp/1.0"
-      xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/">
-      <ferp:administrator>{escape_xml(admin_value)}</ferp:administrator>
-{catalog_line}      <ferp:dataAddedDate>{escape_xml(added_date)}</ferp:dataAddedDate>
-      <ferp:stampSpecVersion>{escape_xml(STAMP_SPEC_VERSION)}</ferp:stampSpecVersion>
-      <xmpMM:DocumentID>{escape_xml(document_id)}</xmpMM:DocumentID>
-      <xmpMM:InstanceID>{escape_xml(instance_id)}</xmpMM:InstanceID>
-        {agreement_block}    
-    </rdf:Description>
-  </rdf:RDF>
-</x:xmpmeta>
-<?xpacket end='w'?>"""
+    if agreement_elements:
+        agreements_element = ET.SubElement(description, f"{{{FERP_NS}}}agreements")
+        agreements_bag = ET.SubElement(agreements_element, f"{{{RDF_NS}}}Bag")
+        agreements_bag.extend(agreement_elements)
+
+    payload = ET.tostring(root, encoding="unicode")
+    xmp = (
+        "<?xpacket begin='' id='W5M0MpCehiHzreSzNTczkc9d'?>\n"
+        f"{payload}\n"
+        "<?xpacket end='w'?>"
+    )
     return xmp.encode("utf-8")
 
 
@@ -2933,12 +2986,14 @@ def set_xmp_metadata(
         if info:
             writer.add_metadata(info)
 
+        existing_xmp = extract_pdf_xmp_text(reader)
         existing_id = document_id or extract_pdf_document_id(reader)
         xmp_bytes = build_xmp_metadata(
             administrator,
             agreements,
             catalog_code=catalog_code,
             document_id=existing_id,
+            existing_xmp=existing_xmp,
         )
 
         md_stream = StreamObject()
@@ -3735,28 +3790,60 @@ def resolve_publisher_fields_raw(
 def partition_publishers_by_stamp_status(
     matched_publishers: list[str],
     category_entries: list[dict],
+    *,
+    selected_sub_catalogs: set[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     stampable_publishers: list[str] = []
     do_not_stamp_publishers: list[str] = []
     matched_set = {p.strip() for p in matched_publishers if p.strip()}
-    seen_stampable: set[str] = set()
-    seen_do_not_stamp: set[str] = set()
+    entries_by_publisher: dict[str, list[dict]] = {}
+    seen_publishers: set[str] = set()
 
     for entry in category_entries:
         publisher = str(entry.get("publisher", "")).strip()
         if publisher not in matched_set:
             continue
-        status = str(entry.get("status", "")).strip()
-        if status == "Active: Do Not Stamp":
-            if publisher not in seen_do_not_stamp:
-                do_not_stamp_publishers.append(publisher)
-                seen_do_not_stamp.add(publisher)
+        entries_by_publisher.setdefault(publisher, []).append(entry)
+
+    for publisher in matched_publishers:
+        publisher = publisher.strip()
+        if not publisher or publisher in seen_publishers:
             continue
-        if publisher not in seen_stampable:
+        seen_publishers.add(publisher)
+        entries = entries_by_publisher.get(publisher, [])
+        eligible_entries = entries
+        if selected_sub_catalogs is not None:
+            eligible_entries = [
+                entry
+                for entry in entries
+                if str(entry.get("sub-catalog", "")).strip() in selected_sub_catalogs
+            ]
+        if any(
+            str(entry.get("status", "")).strip() != "Active: Do Not Stamp"
+            for entry in eligible_entries
+        ):
             stampable_publishers.append(publisher)
-            seen_stampable.add(publisher)
+        elif entries:
+            do_not_stamp_publishers.append(publisher)
 
     return stampable_publishers, do_not_stamp_publishers
+
+
+def filter_publishers_by_sub_catalog(
+    publishers: list[str],
+    category_entries: list[dict],
+    selected_sub_catalogs: set[str],
+) -> list[str]:
+    eligible_publishers = {
+        str(entry.get("publisher", "")).strip()
+        for entry in category_entries
+        if str(entry.get("sub-catalog", "")).strip() in selected_sub_catalogs
+    }
+    return [
+        publisher
+        for publisher in publishers
+        if publisher.strip() in eligible_publishers
+    ]
 
 
 def scale_from_top_space(top_space_pts: float) -> float:
@@ -4071,6 +4158,7 @@ def _normalized_publisher_entry(row: dict[str, Any]) -> dict[str, Any] | None:
         "effective date": _column_text(columns, "Effective Date"),
         "expiration date": _column_text(columns, "Expiration Date"),
         "status": _column_text(columns, "Status"),
+        "sub-catalog": _column_text(columns, "Sub-catalog"),
         "observed_name_variants": normalize_observed_name_variants(
             _column_text(columns, "Observed Name Variants")
         ),
@@ -4177,6 +4265,12 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 "default": False,
             },
             {
+                "id": "by_sub_catalog",
+                "type": "bool",
+                "label": "By Sub-Catalog",
+                "default": False,
+            },
+            {
                 "id": "custom_stamp",
                 "type": "bool",
                 "label": "Custom stamp",
@@ -4247,6 +4341,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     in_place = payload["in_place"]
     adjust_header = payload["adjust_header"]
     manual_select = payload["manual_select"]
+    by_sub_catalog = payload.get("by_sub_catalog", False)
 
     if custom_stamp:
         main_pub_set: set[str] = set()
@@ -4255,8 +4350,80 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
         main_pub_set = {p.strip() for p in main_con_pubs if p.strip()}
         copub_pub_set = {p.strip() for p in copub_con_pubs if p.strip()}
 
+    selected_sub_catalogs: set[str] | None = None
+    if by_sub_catalog and cat_object and not custom_stamp:
+        sub_catalog_options = sorted(
+            {
+                str(entry.get("sub-catalog", "")).strip()
+                for entry in cat_object
+                if str(entry.get("sub-catalog", "")).strip()
+            },
+            key=str.casefold,
+        )
+        if not sub_catalog_options:
+            api.emit_result(
+                {
+                    "_status": "error",
+                    "_title": "Error: Missing Sub-Catalog Data",
+                    "Info": (
+                        "No Sub-Catalog values were found for the selected "
+                        "publisher catalog codes."
+                    ),
+                }
+            )
+            return
+        while selected_sub_catalogs is None:
+            selection_payload = api.request_input_json(
+                "Select sub-catalogs",
+                id="ferp_process_cue_sheets_selected_sub_catalogs",
+                fields=[
+                    {
+                        "id": "selected_sub_catalogs",
+                        "type": "multi_select",
+                        "label": f"Publisher catalog codes: {codes_label}",
+                        "options": sub_catalog_options,
+                        "default": [],
+                    }
+                ],
+                show_text_input=False,
+                payload_type=SubCatalogSelectionResponse,
+            )
+            selected = selection_payload.get("selected_sub_catalogs", [])
+            if selected:
+                selected_sub_catalogs = {
+                    str(value).strip() for value in selected if str(value).strip()
+                }
+            else:
+                api.log("warn", "Select at least one sub-catalog to continue.")
+
     selected_pubs: list[str] = []
     if manual_select and con_pubs and not custom_stamp:
+        publisher_options = con_pubs
+        publisher_label = f"Publisher catalog codes: {codes_label}"
+        if selected_sub_catalogs is not None:
+            publisher_options = filter_publishers_by_sub_catalog(
+                con_pubs,
+                cat_object,
+                selected_sub_catalogs,
+            )
+            selected_sub_catalog_label = ", ".join(
+                sorted(selected_sub_catalogs, key=str.casefold)
+            )
+            publisher_label = (
+                f"Sub-catalogs: {selected_sub_catalog_label}\n\n"
+                f"Publisher catalog codes: {codes_label}"
+            )
+        if not publisher_options:
+            api.emit_result(
+                {
+                    "_status": "error",
+                    "_title": "Error: No Publishers Available",
+                    "Info": (
+                        "No publishers were found for the selected sub-catalogs."
+                    ),
+                }
+            )
+            return
         selection_payload = api.request_input_json(
             "Select controlled publishers",
             id="ferp_process_cue_sheets_selected_pubs",
@@ -4264,8 +4431,8 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 {
                     "id": "selected_pubs",
                     "type": "multi_select",
-                    "label": f"Publisher catalog codes: {codes_label}",
-                    "options": con_pubs,
+                    "label": publisher_label,
+                    "options": publisher_options,
                     "default": [],
                 }
             ],
@@ -4513,8 +4680,13 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
             fmt = "manual"
             raw_cues = []
             filtered_cues = []
-            matched_publishers = selected_pubs
-            lic_only_publishers: list[str] = []
+            matched_publishers, lic_only_publishers = (
+                partition_publishers_by_stamp_status(
+                    selected_pubs,
+                    cat_object,
+                    selected_sub_catalogs=selected_sub_catalogs,
+                )
+            )
             accuracy_audits = {}
         else:
             needs_ocr = False
@@ -4644,30 +4816,31 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 partition_publishers_by_stamp_status(
                     matched_publishers,
                     cat_object,
+                    selected_sub_catalogs=selected_sub_catalogs,
                 )
             )
 
-            if lic_only_publishers and not matched_publishers:
-                api.check_cancel()
-                lic_dir = pdf_path.parent / "_lic"
-                lic_dir.mkdir(exist_ok=True)
-                _move_file(pdf_path, lic_dir / pdf_path.name)
-                created_dirs.add("_lic")
-                api.log(
-                    "info",
-                    f"{pdf_path.name}: matched only do-not-stamp publishers; moved to _lic | do_not_stamp_publishers={', '.join(lic_only_publishers)}",
-                )
-                api.log(
-                    "info",
-                    f"Processed '{pdf_path.relative_to(target_dir)}' | format={fmt} | total_cues={len(raw_cues)} | filtered_cues={len(filtered_cues)} | matched_controlled_publishers= | do_not_stamp_publishers={', '.join(lic_only_publishers)} | accuracy_audits={str(accuracy_audits)}",
-                )
-                continue
+        if lic_only_publishers and not matched_publishers:
+            api.check_cancel()
+            lic_dir = pdf_path.parent / "_lic"
+            lic_dir.mkdir(exist_ok=True)
+            _move_file(pdf_path, lic_dir / pdf_path.name)
+            created_dirs.add("_lic")
+            api.log(
+                "info",
+                f"{pdf_path.name}: matched only non-stampable publishers; moved to _lic | do_not_stamp_publishers={', '.join(lic_only_publishers)}",
+            )
+            api.log(
+                "info",
+                f"Processed '{pdf_path.relative_to(target_dir)}' | format={fmt} | total_cues={len(raw_cues)} | filtered_cues={len(filtered_cues)} | matched_controlled_publishers= | do_not_stamp_publishers={', '.join(lic_only_publishers)} | accuracy_audits={str(accuracy_audits)}",
+            )
+            continue
 
-            if lic_only_publishers:
-                api.log(
-                    "info",
-                    f"{pdf_path.name}: matched do-not-stamp publishers excluded from stamp | do_not_stamp_publishers={', '.join(lic_only_publishers)}",
-                )
+        if lic_only_publishers:
+            api.log(
+                "info",
+                f"{pdf_path.name}: non-stampable publishers excluded from stamp | do_not_stamp_publishers={', '.join(lic_only_publishers)}",
+            )
         if custom_stamp:
             lic_only_publishers = []
         matched_main = [p for p in matched_publishers if p in main_pub_set]
