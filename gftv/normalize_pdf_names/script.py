@@ -641,14 +641,32 @@ def _write_name_metadata(
 ) -> None:
     try:
         from ferp.fscp.scripts.common.metadata import (
+            read_pdf_ferp_metadata,
             set_pdf_ferp_title_metadata_inplace,
         )
 
+        existing = read_pdf_ferp_metadata(path)
+
+        def preserve_full_value(value: str | None, existing_value: str) -> str | None:
+            if value and ELLIPSIS in value and existing_value:
+                return existing_value
+            return value
+
         set_pdf_ferp_title_metadata_inplace(
             path,
-            production_title=metadata.production,
-            episode_title=metadata.episode_title,
-            episode_info=metadata.episode_info,
+            production_title=preserve_full_value(
+                metadata.production,
+                existing.production_title if existing else "",
+            )
+            or metadata.production,
+            episode_title=preserve_full_value(
+                metadata.episode_title,
+                existing.episode_title if existing else "",
+            ),
+            episode_info=preserve_full_value(
+                metadata.episode_info,
+                existing.episode_info if existing else "",
+            ),
         )
     except Exception as exc:
         api.log(
