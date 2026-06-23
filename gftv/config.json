@@ -1,5 +1,5 @@
 {
-  "version": "2.2.1",
+  "version": "2.2.2",
   "scripts": [
     {
       "id": "gftv.circulation_email",
@@ -71,7 +71,7 @@
     {
       "id": "gftv.normalize_pdf_names",
       "name": "Normalize: Cue Sheet Names",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "script": "scripts/gftv/normalize_pdf_names/script.py",
       "dependencies": [
         "googletrans==4.0.2",
