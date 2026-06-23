@@ -1388,6 +1388,9 @@ RC_DESCRIPTOR_TERMS = {
     "LOGO",
     "SRC",
     "*SRC*",
+    "ADD",
+    "CHANGE",
+    "DELETE",
 }
 
 
@@ -1593,6 +1596,10 @@ def parse_rapidcue(
         # Peel descriptor prefix (e.g., "Bumper E ...")
         descriptor, remainder = rc_peel_descriptor_prefix(line)
         if descriptor:
+            if descriptor.lower().strip() == "delete":
+                # "Delete" descriptor is a cue-level instruction, not a role line
+                current_cue["notes"].append(descriptor)
+                continue
             current_cue["notes"].append(descriptor)
 
         # Role start
@@ -1969,7 +1976,7 @@ def parse_via(
     rows_total = 0
     header_map: dict[str, int] | None = None
     skipped_pub_count = 0
-    SKIP_PUB = re.compile(r"extreme\smusic\slibrary", re.IGNORECASE)
+    SKIP_PUB = re.compile(r"extreme\smusic", re.IGNORECASE)
     required_headers = {"cue_no", "title", "composers", "publishers", "usage"}
 
     def clean(value):
@@ -4418,9 +4425,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                 {
                     "_status": "error",
                     "_title": "Error: No Publishers Available",
-                    "Info": (
-                        "No publishers were found for the selected sub-catalogs."
-                    ),
+                    "Info": ("No publishers were found for the selected sub-catalogs."),
                 }
             )
             return
