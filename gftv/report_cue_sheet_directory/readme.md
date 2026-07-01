@@ -31,6 +31,7 @@ Creates an Excel summary of cue sheet PDFs stored in the expected GFTV folder la
 - `Episode Title`
 - `Season Number`
 - `Episode Number`
+- `Version Info`
 - `Territory Code`
 - `Territory`
 

@@ -31,6 +31,7 @@ class CueSheetRow:
     episode_title: str
     season_number: str
     episode_number: str
+    version_info: str
     territory_code: str
     territory: str
 
@@ -128,10 +129,10 @@ class PublisherInsightBucket:
 _PRODUCTION_DELIM = "   "
 _EPISODE_DELIM = "  "
 _TRUNCATION_MARKER = ". . ."
-_DATEISH_EPISODE_NUMBER_RE = re.compile(
-    r"^\d{6,8}(?:-\d+[A-Za-z]?)?$|^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$"
+_EPISODE_INFO_RE = re.compile(
+    r"^Ep\s+No\.\s*(\d{4,5}|\d{8})([A-Za-z]?)(?:\s+(.+))?$",
+    re.IGNORECASE,
 )
-_EPISODE_CODE_RE = re.compile(r"^\d{4,5}$")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MONTHLY_REPORT_MODE = "Monthly Report"
 _WEEKLY_REPORT_MODE = "Weekly Report"
@@ -236,6 +237,7 @@ def _record_sort_key(record: CueSheetRecord) -> tuple[str, ...]:
         row.episode_title.lower(),
         row.season_number.lower(),
         row.episode_number.lower(),
+        row.version_info.lower(),
         row.territory_code.lower(),
         row.relative_path.lower(),
     )
@@ -253,6 +255,7 @@ def _path_row_sort_key(row: CueSheetRow) -> tuple[str, ...]:
         row.episode_title.lower(),
         row.season_number.lower(),
         row.episode_number.lower(),
+        row.version_info.lower(),
         row.territory_code.lower(),
         row.territory.lower(),
         row.relative_path.lower(),
@@ -265,15 +268,15 @@ def _catalog_match(path_catalog: str, xmp_catalog_code: str) -> str:
     return _yes_no(path_catalog.casefold() == xmp_catalog_code.casefold())
 
 
-def _parse_series_title_fields(stem: str) -> tuple[str, str, str, str]:
+def _parse_series_title_fields(stem: str) -> tuple[str, str, str, str, str]:
     if _PRODUCTION_DELIM not in stem:
-        return stem, "", "", ""
+        return stem, "", "", "", ""
 
     production_title, remainder = stem.split(_PRODUCTION_DELIM, 1)
     production_title = production_title.strip()
     remainder = remainder.strip()
-    if not remainder or "Ep No." not in remainder:
-        return production_title, "", "", ""
+    if not remainder:
+        return production_title, "", "", "", ""
 
     episode_title = ""
     episode_info = remainder
@@ -281,33 +284,41 @@ def _parse_series_title_fields(stem: str) -> tuple[str, str, str, str]:
         possible_episode_title, possible_episode_info = remainder.rsplit(
             _EPISODE_DELIM, 1
         )
-        if "Ep No." in possible_episode_info:
+        if _EPISODE_INFO_RE.match(possible_episode_info.strip()):
+            episode_title = possible_episode_title.strip()
+            episode_info = possible_episode_info.strip()
+        elif not possible_episode_info.strip().lower().startswith("ep no."):
             episode_title = possible_episode_title.strip()
             episode_info = possible_episode_info.strip()
 
     episode_info = episode_info.strip()
-    if "Ep No." not in episode_info:
-        return production_title, episode_title, "", ""
+    if not episode_info:
+        return production_title, episode_title, "", "", ""
+    if not episode_info.lower().startswith("ep no."):
+        return production_title, episode_title, "", "", episode_info
 
-    _, episode_number = episode_info.split("Ep No.", 1)
-    episode_number = episode_number.strip()
-    if not episode_number or _DATEISH_EPISODE_NUMBER_RE.fullmatch(episode_number):
-        return production_title, episode_title, "", ""
+    match = _EPISODE_INFO_RE.match(episode_info)
+    if not match:
+        return production_title, episode_title, "", "", episode_info
 
-    season_number = ""
-    if _EPISODE_CODE_RE.fullmatch(episode_number):
-        if len(episode_number) == 4:
-            season_number = episode_number[0]
-        else:
-            season_number = episode_number[:2]
-        episode_number = str(int(episode_number[-3:]))
+    digits, suffix, version_info = match.groups()
+    version_info = _normalize_text(version_info or "")
+    if len(digits) == 8:
+        return production_title, episode_title, "", digits, version_info
 
-    return production_title, episode_title, season_number, episode_number
+    if len(digits) == 4:
+        season_number = digits[0]
+        episode_number = digits[1:]
+    else:
+        season_number = digits[:2]
+        episode_number = digits[2:]
+    episode_number = f"{episode_number}{suffix or ''}"
+    return production_title, episode_title, season_number, episode_number, version_info
 
 
-def _parse_title_fields(stem: str, media_type: str) -> tuple[str, str, str, str]:
+def _parse_title_fields(stem: str, media_type: str) -> tuple[str, str, str, str, str]:
     if media_type == "film":
-        return stem, "", "", ""
+        return stem, "", "", "", ""
     return _parse_series_title_fields(stem)
 
 
@@ -322,6 +333,7 @@ def _replace_title_fields_from_metadata(
     episode_title = row.episode_title
     season_number = row.season_number
     episode_number = row.episode_number
+    version_info = row.version_info
     changed = False
 
     if row.production_title.endswith(_TRUNCATION_MARKER) and metadata.production_title:
@@ -346,6 +358,7 @@ def _replace_title_fields_from_metadata(
             _metadata_episode_title,
             season_number,
             episode_number,
+            version_info,
         ) = _parse_series_title_fields(metadata_stem)
 
     return CueSheetRow(
@@ -361,6 +374,7 @@ def _replace_title_fields_from_metadata(
         episode_title=episode_title,
         season_number=season_number,
         episode_number=episode_number,
+        version_info=version_info,
         territory_code=row.territory_code,
         territory=row.territory,
     )
@@ -425,7 +439,7 @@ def _parse_cue_sheet_path(
 
     film_or_series = "Film" if media_type == "film" else "Series"
     title_stem = Path(filename).stem
-    production_title, episode_title, season_number, episode_number = (
+    production_title, episode_title, season_number, episode_number, version_info = (
         _parse_title_fields(title_stem, media_type)
     )
 
@@ -442,6 +456,7 @@ def _parse_cue_sheet_path(
         episode_title=episode_title,
         season_number=season_number,
         episode_number=episode_number,
+        version_info=version_info,
         territory_code=territory_code,
         territory=_resolve_territory_name(territory_code, territory_names),
     )
@@ -579,6 +594,7 @@ def _write_report(xlsx_path: Path, rows: list[CueSheetRow]) -> None:
         "Episode Title",
         "Season Number",
         "Episode Number",
+        "Version Info",
         "Territory Code",
         "Territory",
     ]
@@ -609,6 +625,7 @@ def _write_report(xlsx_path: Path, rows: list[CueSheetRow]) -> None:
                 row.episode_title,
                 row.season_number,
                 row.episode_number,
+                row.version_info,
                 row.territory_code,
                 row.territory,
             ]
@@ -638,8 +655,9 @@ def _write_report(xlsx_path: Path, rows: list[CueSheetRow]) -> None:
         "G": 32,
         "H": 16,
         "I": 20,
-        "J": 18,
+        "J": 24,
         "K": 18,
+        "L": 18,
     }
     for column, width in column_widths.items():
         default_sheet.column_dimensions[column].width = width
