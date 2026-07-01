@@ -3052,6 +3052,30 @@ def set_xmp_metadata_inplace(
         _unlink_file(tmp_path)
 
 
+def _copy_xmp_metadata(reader: PdfReader, writer: PdfWriter) -> None:
+    existing_xmp = extract_pdf_xmp_text(reader)
+    if not existing_xmp:
+        return
+
+    xmp_bytes = existing_xmp.encode("utf-8")
+    md_stream = StreamObject()
+    set_data = getattr(md_stream, "set_data", None)
+    if callable(set_data):
+        set_data(xmp_bytes)
+    else:
+        md_stream._data = xmp_bytes
+        md_stream.update({NameObject("/Length"): NumberObject(len(xmp_bytes))})
+    md_stream.update(
+        {
+            NameObject("/Type"): NameObject("/Metadata"),
+            NameObject("/Subtype"): NameObject("/XML"),
+        }
+    )
+
+    md_ref = writer._add_object(md_stream)
+    writer._root_object.update({NameObject("/Metadata"): md_ref})
+
+
 def wrap_text(text: str, font_name: str, font_size: float, max_width: float):
     """
     Greedy word-wrap based on actual font metrics.
@@ -3609,6 +3633,8 @@ def add_stamp(
                     info[k] = str(v)
             if info:
                 writer.add_metadata(info)
+
+        _copy_xmp_metadata(reader, writer)
 
         output_path.parent.mkdir(exist_ok=True)
         with tempfile.NamedTemporaryFile(
