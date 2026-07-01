@@ -611,6 +611,12 @@ def _record_move(
     return outcome
 
 
+def _episode_info_metadata_value(value: str | None) -> str | None:
+    if not value:
+        return value
+    return re.sub(r"^\s*Ep\s+No\.\s*", "", value, count=1, flags=re.IGNORECASE)
+
+
 def _build_summary(outcomes: list[FileOutcome], moved_sources: set[Path]) -> str:
     valid = [out for out in outcomes if out.kind == "valid"]
     renamed = [out for out in outcomes if out.kind == "renamed"]
@@ -663,9 +669,11 @@ def _write_name_metadata(
                 metadata.episode_title,
                 existing.episode_title if existing else "",
             ),
-            episode_info=preserve_full_value(
-                metadata.episode_info,
-                existing.episode_info if existing else "",
+            episode_info=_episode_info_metadata_value(
+                preserve_full_value(
+                    metadata.episode_info,
+                    existing.episode_info if existing else "",
+                )
             ),
         )
     except Exception as exc:

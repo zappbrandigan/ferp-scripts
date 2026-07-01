@@ -317,13 +317,23 @@ def _replace_title_fields_from_metadata(
 ) -> CueSheetRow:
     if metadata is None:
         return row
-    if _TRUNCATION_MARKER not in row.cue_sheet:
-        return row
 
-    production_title = metadata.production_title or row.production_title
-    episode_title = metadata.episode_title or row.episode_title
+    production_title = row.production_title
+    episode_title = row.episode_title
     season_number = row.season_number
     episode_number = row.episode_number
+    changed = False
+
+    if row.production_title.endswith(_TRUNCATION_MARKER) and metadata.production_title:
+        production_title = metadata.production_title
+        changed = True
+
+    if row.episode_title.endswith(_TRUNCATION_MARKER) and metadata.episode_title:
+        episode_title = metadata.episode_title
+        changed = True
+
+    if not changed:
+        return row
 
     if row.film_or_series == "Series" and metadata.episode_info:
         metadata_stem = _format_metadata_title_stem(
@@ -361,6 +371,9 @@ def _format_metadata_title_stem(
     episode_title: str,
     episode_info: str,
 ) -> str:
+    episode_info = episode_info.strip()
+    if episode_info and "Ep No." not in episode_info:
+        episode_info = f"Ep No. {episode_info}"
     if episode_title:
         return (
             f"{production_title}{_PRODUCTION_DELIM}"
