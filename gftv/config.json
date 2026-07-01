@@ -1,5 +1,5 @@
 {
-  "version": "2.2.5",
+  "version": "2.2.6",
   "scripts": [
     {
       "id": "gftv.circulation_email",
@@ -13,7 +13,7 @@
     {
       "id": "gftv.report_cue_sheet_directory",
       "name": "Report: Cue Sheet Directory",
-      "version": "1.5.2",
+      "version": "1.5.3",
       "script": "scripts/gftv/report_cue_sheet_directory/script.py",
       "dependencies": [
         "openpyxl>=3.1",
