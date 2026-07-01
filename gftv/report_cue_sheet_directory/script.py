@@ -130,7 +130,7 @@ _PRODUCTION_DELIM = "   "
 _EPISODE_DELIM = "  "
 _TRUNCATION_MARKER = ". . ."
 _EPISODE_INFO_RE = re.compile(
-    r"^Ep\s+No\.\s*(\d{4,5}|\d{8})([A-Za-z]?)(?:\s+(.+))?$",
+    r"^Ep\s+No\.\s*(\d{8}-\d+|\d{3,5}|\d{8})([A-Za-z]?)(?:\s+(.+))?$",
     re.IGNORECASE,
 )
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -303,7 +303,9 @@ def _parse_series_title_fields(stem: str) -> tuple[str, str, str, str, str]:
 
     digits, suffix, version_info = match.groups()
     version_info = _normalize_text(version_info or "")
-    if len(digits) == 8:
+    if len(digits) == 3:
+        return production_title, episode_title, "", f"{digits}{suffix or ''}", version_info
+    if len(digits) == 8 or re.fullmatch(r"\d{8}-\d+", digits):
         return production_title, episode_title, "", digits, version_info
 
     if len(digits) == 4:
