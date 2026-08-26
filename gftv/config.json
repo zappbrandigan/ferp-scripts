@@ -1,5 +1,5 @@
 {
-  "version": "2.2.7",
+  "version": "2.3.0",
   "scripts": [
     {
       "id": "gftv.circulation_email",
@@ -85,7 +85,7 @@
     {
       "id": "gftv.group_cue_sheets",
       "name": "Organize: Group Cue Sheets",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "script": "scripts/gftv/group_cue_sheets/script.py",
       "dependencies": [
         "pypdf>=6.6.0"
@@ -130,7 +130,7 @@
     {
       "id": "gftv.convert_excel",
       "name": "Convert: Excel to PDF",
-      "version": "1.1.3",
+      "version": "1.1.4",
       "script": "scripts/gftv/convert_excel/script.py",
       "dependencies": [
         "pywin32>=306; platform_system == \"Windows\""
