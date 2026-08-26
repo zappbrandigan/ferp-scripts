@@ -3958,6 +3958,8 @@ def make_top_space_first_page_inplace(
             if md:
                 writer.add_metadata(md)
 
+        _copy_xmp_metadata(reader, writer)
+
         # ---- Safe in-place overwrite ----
         dir_name = os.path.dirname(pdf_path)
         with tempfile.NamedTemporaryFile(
