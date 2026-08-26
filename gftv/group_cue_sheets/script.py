@@ -98,6 +98,22 @@ def _parse_catalog_codes(xmp: str) -> list[str]:
     return [value for value in values if value]
 
 
+def _parse_production_title(xmp: str) -> str | None:
+    match = re.search(r"(<x:xmpmeta\b.*?</x:xmpmeta>)", xmp, re.DOTALL)
+    xml_payload = match.group(1) if match else xmp
+    try:
+        root = ET.fromstring(xml_payload)
+    except ET.ParseError:
+        return None
+
+    ferp_ns = "https://tulbox.app/ferp/xmp/1.0"
+    production = root.find(f".//{{{ferp_ns}}}productionTitle")
+    if production is None:
+        return None
+    values = _collect_xmp_values(production)
+    return values[0] if values else None
+
+
 def _truncate_name(value: str, max_len: int = MAX_FOLDER_LENGTH) -> str:
     if len(value) <= max_len:
         return value
@@ -121,15 +137,38 @@ def _sanitize_segment(value: str, *, space_replacement: str) -> str:
     return cleaned
 
 
-def _production_group(name: str) -> tuple[str | None, str | None]:
-    stem = name.rsplit(".", 1)[0]
+def _sanitize_production_segment(value: str) -> str:
+    cleaned = _INVALID_NAME_CHARS.sub("", value.strip())
+    return cleaned.rstrip(". ")
+
+
+def _production_group(path: Path) -> tuple[str | None, str | None]:
+    try:
+        reader = PdfReader(str(path))
+        try:
+            if not reader.is_encrypted:
+                xmp = _extract_xmp(reader)
+                production = _parse_production_title(xmp) if xmp else None
+                if production:
+                    folder = _sanitize_production_segment(production)
+                    if folder:
+                        return _truncate_name(folder), None
+        finally:
+            stream = getattr(reader, "stream", None)
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+    except Exception:  # noqa: BLE001
+        pass
+
+    stem = path.stem
     delimiter_index = stem.find(PRODUCTION_DELIM)
     if delimiter_index <= 0:
         return None, "missing production delimiter"
     raw_production = stem[:delimiter_index].strip()
     if not raw_production:
         return None, "missing production title"
-    folder = _sanitize_segment(raw_production, space_replacement="-")
+    folder = _sanitize_production_segment(raw_production)
     if not folder:
         return None, "invalid production title"
     return _truncate_name(folder), None
@@ -250,7 +289,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
     for index, pdf_path in enumerate(pdf_files, start=1):
         api.check_cancel()
         if selection == "production":
-            folder, reason = _production_group(pdf_path.name)
+            folder, reason = _production_group(pdf_path)
         elif selection == "publishers":
             folder, reason = _publisher_group(pdf_path)
         else:

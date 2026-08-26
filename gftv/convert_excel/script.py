@@ -287,7 +287,7 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                             f"Worksheet not found for '{sheet_value or 'active sheet'}'."
                         )
 
-                for worksheet in worksheets:
+                for sheet_index, worksheet in enumerate(worksheets, start=1):
                     api.check_cancel()
                     print_area = _get_print_area(worksheet)
                     _page_setup(
@@ -305,7 +305,15 @@ def main(ctx: sdk.ScriptContext, api: sdk.ScriptAPI) -> None:
                     worksheet.ExportAsFixedFormat(0, str(out_path))
                     converted.append(str(out_path))
                     exported_count += 1
-                api.progress(current=index, total=total_files, unit="files")
+                    if all_tabs:
+                        api.progress(
+                            current=sheet_index,
+                            total=len(worksheets),
+                            unit="tabs",
+                            message=(file_path.name),
+                        )
+                if not all_tabs:
+                    api.progress(current=index, total=total_files, unit="files")
             except Exception as exc:
                 api.log("warn", f"Failed to process '{file_path}': {exc}")
                 failures.append(f"{file_path}: {exc}")

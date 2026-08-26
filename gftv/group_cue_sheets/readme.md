@@ -20,9 +20,10 @@ the filename or the publisher names found in the FERP XMP stamp metadata.
 ## Behavior
 
 - **Production mode**
-  - Uses the filename segment before the first three-space delimiter (`"   "`).
-  - Lowercases the folder name and replaces spaces with `-`.
-  - Skips files without the delimiter and logs a warning.
+  - Uses the FERP `productionTitle` metadata when available.
+  - Otherwise, uses the filename segment before the first three-space delimiter (`"   "`).
+  - Preserves the production title's existing capitalization and spacing.
+  - Skips files without production metadata or the filename delimiter and logs a warning.
 - **Publishers mode**
   - Reads FERP XMP metadata (`ferp:agreements -> publishers`).
   - Lowercases each publisher, replaces spaces with `-`, and joins publishers with `_`.
